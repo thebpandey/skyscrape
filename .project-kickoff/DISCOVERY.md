@@ -4,7 +4,7 @@ Project Kickoff 0.7.0, 2026-11-21. The user selected both v1.1 specifications in
 
 | Decision | Approved execution boundary |
 | --- | --- |
-| DEC-001 | Skyscrape is internal to one organization. Use qualified public sources, free data and services, and private hosting. External sends are outside scope, including outreach, records requests, and webhook deliveries. |
+| DEC-001 | Skyscrape is internal to one organization. The public PRD omits owner attribution. Use qualified public sources, free data and services, and private hosting. External sends are outside scope, including outreach, records requests, and webhook deliveries. |
 | DEC-002 | The first slice requires one qualified municipal permit campaign with traceable field provenance and an authorized CSV. Assess Austin first for rights and metadata. No production market has been selected. If Austin fails qualification, record why and assess another public municipal source. |
 | DEC-003 | Only authorized analysts can export or access contacts through scoped MCP. Only verified public business channels qualify. Apply suppression everywhere, exclude uncertain personal details, and strip contacts from viewer evidence. |
 | DEC-004 | Beads alone tracks execution. The main orchestrator delegates code, scaffold, and documents in isolated worktrees and dispatches separate cross-model review. Maximum six participants total. Every worker, reviewer, remediation, resume, and replacement reads installed `poteto-mode/worker.md` first and applies both `poteto-mode/SKILL.md` and `ponytail/SKILL.md` in full. |
