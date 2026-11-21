@@ -1,0 +1,29 @@
+services:
+  db:
+    image: postgis/postgis:18-3.7@sha256:fe440a27c6567aefa932e988962e5827bb2c29e4b97dac2ca5268f5eafe10262
+    user: postgres
+    environment:
+      POSTGRES_DB: skyscrape
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set the local bootstrap password}
+      DB_MIGRATOR_PASSWORD: ${DB_MIGRATOR_PASSWORD:?Set the local migration password}
+      DB_RUNTIME_PASSWORD: ${DB_RUNTIME_PASSWORD:?Set the local runtime password}
+      POSTGRES_INITDB_ARGS: --auth-local=scram-sha-256 --auth-host=scram-sha-256
+    volumes:
+      - db_data:/var/lib/postgresql
+      - ./infra/compose/db/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - db_private
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=\"$$DB_RUNTIME_PASSWORD\" psql -Xw -h 127.0.0.1 -U skyscrape_runtime -d skyscrape -Atqc 'SELECT postgis_version()' >/dev/null"]
+      interval: 10s
+      start_interval: 1s
+      start_period: 30s
+      timeout: 5s
+      retries: 5
+
+networks:
+  db_private:
+    internal: true
+
+volumes:
+  db_data:
