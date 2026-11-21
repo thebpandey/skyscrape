@@ -15,14 +15,16 @@ import { readEvidence, readPermits } from '../../../packages/db/src/permits.ts'
 import { roles, scopes } from '../../../packages/security/src/index.ts'
 import { logger } from '../../../packages/shared/src/index.ts'
 import { createAuth } from './auth/index.ts'
-import { principalOf, registerAccess } from './middleware/access.ts'
+import { authenticatedOf, principalOf, registerAccess } from './middleware/access.ts'
 import { fail, registerErrors } from './middleware/errors.ts'
 import { registerAdminAuth } from './routes/admin-auth.ts'
 
 export function buildApp({
-  pool, origin, authSecret, keyPepper, masterKey, masterKeyVersion = 1,
+  pool, authPool, adminPool, origin, authSecret, keyPepper, masterKey, masterKeyVersion = 1,
 }: {
   pool: DatabasePool
+  authPool: DatabasePool
+  adminPool: DatabasePool
   origin: string
   authSecret: string
   keyPepper: string
@@ -39,7 +41,7 @@ export function buildApp({
     throw Error('Set application secrets and a valid key version')
   }
 
-  const auth = createAuth(pool, origin, authSecret)
+  const auth = createAuth(authPool, origin, authSecret)
   const loggerInstance: FastifyBaseLogger = logger
   const app = Fastify({
     loggerInstance,
@@ -51,8 +53,17 @@ export function buildApp({
 
   app.setValidatorCompiler(validatorCompiler)
   app.setSerializerCompiler(serializerCompiler)
+  app.addHook('onReady', async () => {
+    const connections: [DatabasePool, string][] = [
+      [pool, 'skyscrape_runtime'], [authPool, 'skyscrape_auth'], [adminPool, 'skyscrape_admin'],
+    ]
+    await Promise.all(connections.map(async ([connection, expected]) => {
+      const { rows: [database] } = await connection.query<{ role: string }>('SELECT current_user AS role')
+      if (database.role !== expected) throw Error(`Expected database role ${expected}`)
+    }))
+  })
   registerErrors(app)
-  registerAccess(app, pool, auth, origin, keyPepper)
+  registerAccess(app, authPool, auth, origin, keyPepper)
   app.register(swagger, {
     openapi: { openapi: '3.1.0', info: { title: 'Skyscrape API', version: '1.0.0' } },
     transform: jsonSchemaTransform,
@@ -63,7 +74,7 @@ export function buildApp({
 
     async function handleAuth(req: FastifyRequest, reply: FastifyReply, email?: string) {
       const passwordBefore = email === undefined ? undefined : (
-        await pool.query<{ id: string; password_revision: number }>(`
+        await authPool.query<{ id: string; password_revision: number }>(`
           SELECT account.id, account.password_revision FROM account
           JOIN "user" owner ON owner.id=account."userId"
           WHERE owner.email=$1 AND account."providerId"='credential'
@@ -89,7 +100,7 @@ export function buildApp({
       }
       if (email !== undefined) {
         const { token } = z.object({ token: z.string() }).parse(await result.json())
-        const sessionIsCurrent = await transaction(pool, async client => {
+        const sessionIsCurrent = await transaction(authPool, async client => {
           // Read the password revision after any in-progress reset commits.
           await client.query('SELECT pg_advisory_xact_lock_shared($1)', [credentialProvisioningLock])
           const { rowCount } = await client.query(`
@@ -139,7 +150,7 @@ export function buildApp({
         if (!parsed.success) fail(400, 'INVALID_CURSOR', 'Invalid cursor')
         after = parsed.data
       }
-      const records = await readPermits(pool, principalOf(req), { ...filter, after, limit: filter.limit + 1 })
+      const records = await readPermits(pool, authenticatedOf(req), { ...filter, after, limit: filter.limit + 1 })
       const page = records.slice(0, filter.limit)
       const last = page.at(-1)
       const nextCursor = records.length > filter.limit && last ? Buffer.from(last.id).toString('base64url') : undefined
@@ -150,7 +161,7 @@ export function buildApp({
       preHandler: app.requireScope('records:read'),
       schema: { params: idParams, response: { 200: envelopeSchema(recordProjection) } },
     }, async req => {
-      const [record] = await readPermits(pool, principalOf(req), { id: req.params.id, limit: 1 })
+      const [record] = await readPermits(pool, authenticatedOf(req), { id: req.params.id, limit: 1 })
       if (!record) fail(404, 'NOT_FOUND', 'Record not found')
       return envelope(record, req.id)
     })
@@ -165,24 +176,34 @@ export function buildApp({
     })
 
     routes.get('/api/v1/openapi.json', { schema: { hide: true } }, async () => app.swagger())
-    registerAdminAuth(app, { pool, keyPepper, masterKey, masterKeyVersion })
+    registerAdminAuth(app, { adminPool, keyPepper, masterKey, masterKeyVersion })
   })
   return app
 }
 
 if (import.meta.main) {
-  const { DATABASE_URL, APP_ORIGIN, AUTH_SECRET, API_KEY_PEPPER, MASTER_KEY, MASTER_KEY_VERSION } = process.env
-  if (!DATABASE_URL || !APP_ORIGIN || !AUTH_SECRET || !API_KEY_PEPPER || !MASTER_KEY) {
-    throw Error('Set DATABASE_URL, APP_ORIGIN, AUTH_SECRET, API_KEY_PEPPER and MASTER_KEY')
+  const {
+    DATABASE_URL, AUTH_DATABASE_URL, ADMIN_DATABASE_URL, APP_ORIGIN, AUTH_SECRET,
+    API_KEY_PEPPER, MASTER_KEY, MASTER_KEY_VERSION,
+  } = process.env
+  if (!DATABASE_URL || !AUTH_DATABASE_URL || !ADMIN_DATABASE_URL) {
+    throw Error('Set DATABASE_URL, AUTH_DATABASE_URL and ADMIN_DATABASE_URL')
+  }
+  if (!APP_ORIGIN || !AUTH_SECRET || !API_KEY_PEPPER || !MASTER_KEY) {
+    throw Error('Set APP_ORIGIN, AUTH_SECRET, API_KEY_PEPPER and MASTER_KEY')
   }
   const origin = new URL(APP_ORIGIN)
   const port = Number(process.env.PORT ?? (origin.port || '3000'))
   const pool = openDatabase(DATABASE_URL)
+  const authPool = openDatabase(AUTH_DATABASE_URL)
+  const adminPool = openDatabase(ADMIN_DATABASE_URL)
   const app = buildApp({
-    pool, origin: APP_ORIGIN, authSecret: AUTH_SECRET, keyPepper: API_KEY_PEPPER,
+    pool, authPool, adminPool, origin: APP_ORIGIN, authSecret: AUTH_SECRET, keyPepper: API_KEY_PEPPER,
     masterKey: Buffer.from(MASTER_KEY, 'base64'), masterKeyVersion: Number(MASTER_KEY_VERSION ?? 1),
   })
-  app.addHook('onClose', () => pool.end())
+  app.addHook('onClose', async () => {
+    await Promise.all([pool.end(), authPool.end(), adminPool.end()])
+  })
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.once(signal, () => { void app.close() })
   }

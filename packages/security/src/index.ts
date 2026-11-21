@@ -9,6 +9,10 @@ export const scopes = [
 export type Scope = typeof scopes[number]
 export type Role = typeof roles[number]
 export type Principal = { id: string; role: Role; kind: 'session' | 'key'; scopes: readonly Scope[] }
+export type Authenticated = {
+  principal: Principal
+  proof: { kind: 'session'; id: string } | { kind: 'key'; digest: Buffer }
+}
 const viewerScopes: readonly Scope[] = [
   'records:read', 'evidence:read', 'runs:read', 'sources:read', 'analytics:read', 'issues:read',
 ]
@@ -41,29 +45,4 @@ export function unseal(encrypted: Buffer, key: Buffer, version: number, purpose:
   decipher.setAAD(Buffer.from(JSON.stringify([version, purpose])))
   decipher.setAuthTag(encrypted.subarray(12, 28))
   return Buffer.concat([decipher.update(encrypted.subarray(28)), decipher.final()]).toString('utf8')
-}
-
-type Contact = {
-  channel: 'email' | 'phone' | 'website'
-  value: string
-  verified: boolean
-  public_business: boolean
-  suppressed: boolean
-  person_suppressed: boolean
-  checked_on: string | null
-}
-
-function hasCurrentCheckDate(checkedOn: string | null, today: string) {
-  if (checkedOn === null || checkedOn > today) return false
-  const timestamp = Date.parse(checkedOn)
-  return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === checkedOn
-}
-
-export function projectContacts(principal: Principal, contacts: readonly Contact[]) {
-  if (!can(principal, 'contacts:read')) return []
-  const today = new Date().toISOString().slice(0, 10)
-  return contacts
-    .filter(contact => contact.verified && contact.public_business && hasCurrentCheckDate(contact.checked_on, today)
-      && !contact.suppressed && !contact.person_suppressed)
-    .map(({ channel, value }) => ({ channel, value }))
 }

@@ -7,6 +7,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set the local bootstrap password}
       DB_MIGRATOR_PASSWORD: ${DB_MIGRATOR_PASSWORD:?Set the local migration password}
       DB_RUNTIME_PASSWORD: ${DB_RUNTIME_PASSWORD:?Set the local runtime password}
+      DB_AUTH_PASSWORD: ${DB_AUTH_PASSWORD:?Set the local authentication password}
+      DB_ADMIN_PASSWORD: ${DB_ADMIN_PASSWORD:?Set the local credential administration password}
       POSTGRES_INITDB_ARGS: --auth-local=scram-sha-256 --auth-host=scram-sha-256
     volumes:
       - db_data:/var/lib/postgresql

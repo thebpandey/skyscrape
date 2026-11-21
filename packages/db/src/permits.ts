@@ -1,6 +1,6 @@
 import type { Evidence, PermitRecord } from '../../contracts/src/index.ts'
-import { can, projectContacts } from '../../security/src/index.ts'
-import type { Principal } from '../../security/src/index.ts'
+import { can } from '../../security/src/index.ts'
+import type { Authenticated, Principal } from '../../security/src/index.ts'
 import type { DatabasePool } from './index.ts'
 
 type PermitFilter = {
@@ -11,7 +11,8 @@ type PermitFilter = {
   limit: number
 }
 
-type PermitRow = Omit<PermitRecord, 'contacts'> & { contacts: Parameters<typeof projectContacts>[1] }
+type PermitRow = Omit<PermitRecord, 'contacts'>
+type ContactRow = PermitRecord['contacts'][number] & { permit_id: string }
 
 const permitFields = [
   ['raw_status', 'rawStatus'], ['status', 'status'],
@@ -27,8 +28,24 @@ const eligibleFields = permitFields.map(([column, field]) => `
       AND evidence.acceptance IN ('verified', 'corroborated')
   ) THEN permit.${column}::text END AS "${field}"`).join(',')
 
-export async function readPermits(pool: DatabasePool, principal: Principal, filter: PermitFilter) {
-  if (!can(principal, 'records:read')) return []
+export async function readPermitContacts(pool: DatabasePool, { principal, proof }: Authenticated, permitIds: readonly string[]) {
+  const contacts = new Map<string, PermitRecord['contacts']>()
+  if (!can(principal, 'contacts:read') || !permitIds.length) return contacts
+  const sessionId = proof.kind === 'session' ? proof.id : null
+  const keyDigest = proof.kind === 'key' ? proof.digest : null
+  const { rows } = await pool.query<ContactRow>(`
+    SELECT permit_id, channel, value FROM skyscrape_access.read_permit_contacts($1,$2,$3,$4)
+  `, [permitIds, principal.id, sessionId, keyDigest])
+  for (const { permit_id, channel, value } of rows) {
+    const channels = contacts.get(permit_id)
+    if (channels) channels.push({ channel, value })
+    else contacts.set(permit_id, [{ channel, value }])
+  }
+  return contacts
+}
+
+export async function readPermits(pool: DatabasePool, authenticated: Authenticated, filter: PermitFilter) {
+  if (!can(authenticated.principal, 'records:read')) return []
   const { rows } = await pool.query<PermitRow>(`
     WITH page AS (
       SELECT permit.*
@@ -41,26 +58,11 @@ export async function readPermits(pool: DatabasePool, principal: Principal, filt
     )
     SELECT permit.id, permit.jurisdiction, permit.permit_number AS "permitNumber", ${eligibleFields},
       ARRAY(SELECT DISTINCT evidence.observation_id FROM permit_evidence evidence
-            WHERE evidence.permit_id = permit.id ORDER BY evidence.observation_id) AS "evidenceIds",
-      CASE WHEN $6::boolean THEN (
-        SELECT COALESCE(jsonb_agg(jsonb_build_object(
-          'channel', contact.channel, 'value', contact.value, 'checked_on', contact.checked_on,
-          'verified', contact.verified, 'public_business', contact.public_business,
-          'suppressed', contact.suppressed, 'person_suppressed', COALESCE(person.suppressed, false)
-        ) ORDER BY contact.id), '[]'::jsonb)
-        FROM contacts contact
-        JOIN eligible_observations observation ON observation.id = contact.observation_id
-        LEFT JOIN people person ON person.id = contact.person_id
-        WHERE EXISTS (
-          SELECT 1 FROM permit_participants participant
-          JOIN eligible_observations participant_observation ON participant_observation.id = participant.observation_id
-          WHERE participant.permit_id = permit.id AND participant.organization_id = contact.organization_id
-            AND (contact.person_id IS NULL OR contact.person_id = participant.person_id)
-        )
-      ) ELSE '[]'::jsonb END AS contacts
+            WHERE evidence.permit_id = permit.id ORDER BY evidence.observation_id) AS "evidenceIds"
     FROM page permit ORDER BY permit.id
-  `, [filter.id, filter.after, filter.jurisdiction, filter.permitNumber, filter.limit, can(principal, 'contacts:read')])
-  return rows.map(({ contacts, ...record }) => ({ ...record, contacts: projectContacts(principal, contacts) }))
+  `, [filter.id, filter.after, filter.jurisdiction, filter.permitNumber, filter.limit])
+  const contacts = await readPermitContacts(pool, authenticated, rows.map(record => record.id))
+  return rows.map(record => ({ ...record, contacts: contacts.get(record.id) ?? [] }))
 }
 
 export async function readEvidence(pool: DatabasePool, principal: Principal, id: string) {
