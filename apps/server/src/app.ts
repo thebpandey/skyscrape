@@ -23,6 +23,8 @@ import { registerChatGPT } from './routes/chatgpt-settings.ts'
 import { registerAdminAuth } from './routes/admin-auth.ts'
 import { registerCampaigns } from './routes/campaigns.ts'
 import { registerRuns } from './routes/runs.ts'
+import { registerOperationalPages } from './routes/operational-pages.ts'
+import { registerOverview } from './routes/overview.ts'
 
 export function buildApp({
   pool, authPool, adminPool, origin, authSecret, authCookiePrefix, keyPepper, masterKey, masterKeyVersion = 1, chatgpt,
@@ -193,6 +195,8 @@ export function buildApp({
     registerAdminAuth(app, { adminPool, keyPepper, masterKey, masterKeyVersion })
     registerCampaigns(app, pool)
     registerRuns(app, pool)
+    registerOperationalPages(app, pool)
+    registerOverview(app, pool)
   })
   return app
 }

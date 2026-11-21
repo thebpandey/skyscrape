@@ -1,0 +1,12 @@
+.operational-page section { margin-block: 1.75rem; }
+.operational-page h2 { font-size: 1.1rem; }
+.ops-list { list-style: none; margin: 0; padding: 0; }
+.ops-list > li { padding: 1rem 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.ops-list summary { cursor: pointer; padding-block: .35rem; }
+.ops-list summary span { margin-inline-start: .75rem; color: var(--muted); }
+.ops-list p { margin-block: .5rem; }
+.ops-actions, .ops-form { display: flex; flex-wrap: wrap; align-items: center; gap: .65rem; }
+.ops-form label { width: 100%; }
+.ops-form select { max-width: 100%; }
+.ops-list .checksum { display: block; margin-block: .5rem; }
+.ops-list .button { margin-top: .35rem; }

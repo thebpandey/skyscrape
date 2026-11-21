@@ -415,6 +415,32 @@ test('uses secure cookie sessions, rejects foreign origins, and audits local res
   assert.equal(runBootstrap('reset'), 0)
 })
 
+test('overview counts distinct eligible permit evidence and excludes unknown and synthetic sources', async () => {
+  const url = '/api/v1/overview'
+  assert.equal((await app.inject({ url })).statusCode, 401)
+  const headers = { cookie: await sessionCookie(viewerEmail) }
+  async function read() {
+    const response = await app.inject({ url, headers })
+    assert.equal(response.statusCode, 200)
+    assert.ok(!response.body.includes(privateMarker) && !response.body.includes(channel))
+    return response.json().data
+  }
+  assert.equal((await read()).permits, 0)
+  try {
+    // Exercise live-source metadata on a wholly synthetic, disposable test database.
+    await migrator.query(`UPDATE source_versions SET manifest='{"synthetic":false}' WHERE id=ANY($1)`,
+      [[sourceVersionId, unqualifiedVersionId]])
+    const data = await read()
+    assert.equal(data.permits, 2)
+    assert.equal(data.observations, 1)
+    assert.deepEqual(data.sources, [{ source: 'Synthetic permits', permits: 2, observations: 1 }])
+    await migrator.query(`UPDATE source_versions SET manifest='{"synthetic":true}' WHERE id=$1`, [sourceVersionId])
+    assert.equal((await read()).permits, 0)
+  } finally {
+    await migrator.query(`UPDATE source_versions SET manifest='{}' WHERE id=ANY($1)`, [[sourceVersionId, unqualifiedVersionId]])
+  }
+})
+
 test('projects only eligible permit fields and analyst business channels', async () => {
   const analyst = await sessionCookie(analystEmail)
   const viewer = await sessionCookie(viewerEmail)

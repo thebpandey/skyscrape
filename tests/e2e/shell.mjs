@@ -146,6 +146,8 @@ async function checkAxe(page, name) {
 }
 
 async function checkContrast(page, theme) {
+  // Axe opens a page during its scan. A real tab return revalidates evidence.
+  await expect(page.locator('.trace dd').first()).toBeVisible()
   const ratios = await page.evaluate(() => {
     const styles = selector => getComputedStyle(document.querySelector(selector))
     const luminance = color => color.match(/\d+(?:\.\d+)?/g).slice(0, 3).map(channel => {
@@ -180,10 +182,15 @@ async function assertTheme(page, name) {
 }
 
 let browser
+let physicalTabs
 try {
   browser = await chromium.launch({ executablePath: process.env.SHELL_CHROME ?? '/usr/bin/google-chrome', headless: true })
-  const desktop = await browser.newContext({ viewport: { width: 1440, height: 960 }, colorScheme: 'light' })
+  if (process.env.SHELL_BROWSER_CDP) {
+    physicalTabs = await chromium.connectOverCDP(process.env.SHELL_BROWSER_CDP, { noDefaults: true })
+  }
+  const desktop = physicalTabs?.contexts()[0] ?? await browser.newContext({ viewport: { width: 1440, height: 960 }, colorScheme: 'light' })
   const wide = await desktop.newPage()
+  await wide.setViewportSize({ width: 1440, height: 960 })
   const wideState = await mount(wide, { authenticated: false })
   await wide.goto(origin + '/records')
   await expect(wide.getByRole('heading', { name: 'Sign in' })).toBeVisible()
@@ -279,20 +286,68 @@ try {
   await wide.keyboard.press('Control+k')
   const helpCommand = command.getByRole('button', { name: 'Help' })
   await helpCommand.focus()
-  const samePrincipal = await deferSessionCheck(wide)
-  try {
-    await wide.evaluate(() => window.dispatchEvent(new Event('focus')))
-    await samePrincipal.requested
-    await expect(wide.getByText('Checking your session…')).toBeVisible()
-    await expect(command).not.toBeVisible()
-    await expect(evidencePane).not.toBeVisible()
-  } finally {
-    samePrincipal.release()
+  const otherTab = await desktop.newPage()
+  async function activate(tab) {
+    await tab.bringToFront()
+    if (!physicalTabs) await tab.evaluate(() => window.dispatchEvent(new Event('focus')))
+  }
+  async function switchAway() {
+    await otherTab.bringToFront()
+    if (!physicalTabs) await wide.evaluate(() => window.dispatchEvent(new Event('blur')))
+    else await expect.poll(() => wide.evaluate(() => document.visibilityState)).toBe('hidden')
+  }
+  await activate(wide)
+  await command.getByLabel('Exact permit number').fill('unsaved synthetic search')
+  await helpCommand.focus()
+  for (let round = 0; round < 2; round++) {
+    await switchAway()
+    const samePrincipal = await deferSessionCheck(wide)
+    try {
+      await activate(wide)
+      await samePrincipal.requested
+      await expect(wide.locator('.desktop-rail')).toBeVisible()
+      await expect(wide.locator('.breadcrumbs')).toBeVisible()
+      await expect(wide.locator('.desktop-rail')).toHaveAttribute('inert', '')
+      await expect(wide.getByText('Checking your session…')).toHaveCount(0)
+      await expect(command).not.toBeVisible()
+      await expect(evidencePane).not.toBeVisible()
+    } finally {
+      samePrincipal.release()
+    }
+    await expect(command.getByLabel('Exact permit number')).toHaveValue('unsaved synthetic search')
+    await expect(helpCommand).toBeFocused()
   }
   await expect(helpCommand).toBeFocused()
   await expect(wide).toHaveURL(new RegExp(permits[0].id + '\\?permitNumber='))
   await wide.keyboard.press('Escape')
   await expect(command).not.toBeVisible()
+
+  await wide.setViewportSize({ width: 1440, height: 480 })
+  const draft = wide.getByLabel('Jurisdiction', { exact: true })
+  await draft.fill('unsaved synthetic jurisdiction')
+  const scroll = await wide.evaluate(() => {
+    window.scrollTo(0, 125)
+    return window.scrollY
+  })
+  assert(scroll > 0)
+  await switchAway()
+  const failedCheck = await deferSessionCheck(wide)
+  await activate(wide)
+  await failedCheck.requested
+  await expect(wide.locator('.desktop-rail')).toBeVisible()
+  assert.equal(await wide.evaluate(() => window.scrollY), scroll)
+  try {
+    await expect(wide.getByRole('alert')).toContainText('Couldn’t load your session', { timeout: 15_000 })
+    await expect(evidencePane).not.toBeVisible()
+    await expect(wide.getByRole('heading', { name: 'Sign in' })).not.toBeVisible()
+  } finally {
+    failedCheck.release()
+  }
+  await wide.getByRole('button', { name: 'Try again' }).click()
+  await expect(draft).toHaveValue('unsaved synthetic jurisdiction')
+  await expect.poll(() => wide.evaluate(() => window.scrollY)).toBe(scroll)
+  await expect(evidencePane).toContainText('Austin permit register')
+  await wide.setViewportSize({ width: 1440, height: 960 })
 
   // Hold an already-authorized analyst response across a second tab's role change.
   const stale = Promise.withResolvers()
@@ -305,7 +360,6 @@ try {
   await wide.evaluate(() => window.dispatchEvent(new Event('focus')))
   await pending
   await wide.evaluate(() => window.dispatchEvent(new Event('blur')))
-  const otherTab = await desktop.newPage()
   await mount(otherTab, { sharedState: wideState })
   await otherTab.goto(origin + '/records')
   await otherTab.bringToFront()
@@ -317,12 +371,12 @@ try {
   await expect(otherTab.getByRole('heading', { name: 'Permit Register' })).toBeVisible()
   const changedPrincipal = await deferSessionCheck(wide)
   try {
-    await wide.bringToFront()
-    // Headless Chromium reports both tabs focused and does not dispatch activation events.
-    await wide.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await activate(wide)
     await changedPrincipal.requested
     stale.resolve()
-    await expect(wide.getByText('Checking your session…')).toBeVisible()
+    await expect(wide.locator('.desktop-rail')).toBeVisible()
+    await screenshot(wide, 'session-revalidation-synthetic')
+    await expect(wide.getByText('Checking your session…')).toHaveCount(0)
     await expect(evidencePane).not.toBeVisible()
     await expect(wide.getByRole('link', { name: 'Exports' })).not.toBeVisible()
     const shortcutUnhandled = await wide.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', {
@@ -342,15 +396,14 @@ try {
   await expect(firstRow).toHaveCount(0)
   await assertTheme(wide, 'light')
 
-  await otherTab.bringToFront()
+  await switchAway()
   wideState.scopesOverride = ['records:read']
-  await wide.bringToFront()
-  await wide.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+  await activate(wide)
   await expect(wide.getByRole('link', { name: 'Sources' })).toHaveCount(0)
   await secondRow.click()
   await expect(evidencePane.getByRole('alert')).toContainText('Access denied')
   await otherTab.close()
-  console.log('Pending session checks hid evidence, navigation, and search. Matching checks restored route and focus, and changed checks reset scope and data.')
+  console.log('Pending session checks retained the rail and breadcrumbs and concealed evidence and search. Two returns retained the draft and focus. Changed authority reset the route and records.')
 
   await wide.getByRole('button', { name: 'Sign out' }).click()
   await expect(wide.getByRole('heading', { name: 'Sign in' })).toBeVisible()
@@ -412,6 +465,7 @@ try {
   console.log('Narrow navigation, both themes, responsive table and modal, focus containment/restoration, and unauthorized states passed.')
   console.log('Axe WCAG A/AA scans passed for desktop light, desktop dark, and narrow evidence. Browser data was synthetic.')
 } finally {
+  await physicalTabs?.close()
   await browser?.close()
   await server.close()
 }

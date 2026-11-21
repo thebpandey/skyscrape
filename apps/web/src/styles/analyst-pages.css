@@ -1,0 +1,23 @@
+.analyst-page { max-width: 80rem; }
+.analyst-page > section { border-top: 1px solid var(--divider); padding: 1.25rem 0; }
+.analyst-page h2, .analyst-page h3 { margin: 0 0 .5rem; }
+.analyst-page p { line-height: 1.55; max-width: 78ch; }
+.analyst-page .text-link { display: inline-flex; align-items: center; gap: .4rem; margin-top: .5rem; }
+.coverage-counts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); gap: .75rem; margin: 1.25rem 0; }
+.coverage-counts > div { border-left: .22rem solid var(--yellow); padding: .25rem .85rem; }
+.coverage-counts dt { color: var(--muted); }
+.coverage-counts dd { margin: .25rem 0 0; font-size: 1.75rem; font-variant-numeric: tabular-nums; }
+.coverage-table { max-width: 100%; overflow-x: auto; }
+.coverage-table table { width: 100%; border-collapse: collapse; }
+.coverage-table caption { text-align: left; font-weight: bold; padding: .5rem 0; }
+.coverage-table th, .coverage-table td { text-align: left; padding: .6rem; border-bottom: 1px solid var(--divider); overflow-wrap: anywhere; }
+.activity-list { list-style: none; margin: .75rem 0; padding: 0; }
+.activity-list > li { border-bottom: 1px solid var(--divider); padding: .55rem 0; overflow-wrap: anywhere; }
+.activity-list .activity-list { margin-left: 1rem; }
+.activity-row { display: flex; align-items: center; flex-wrap: wrap; gap: .45rem 1rem; }
+.activity-row .button { margin-inline-start: auto; }
+.help-search { display: grid; gap: .4rem; max-width: 28rem; margin: 1rem 0; }
+.help-search input { min-width: 0; }
+.help-topic summary { cursor: pointer; font-weight: bold; padding: .85rem 0; }
+.help-topic { border-bottom: 1px solid var(--divider); overflow-wrap: anywhere; }
+.help-topic p { margin: .45rem 0 .75rem; }

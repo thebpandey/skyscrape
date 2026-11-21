@@ -190,7 +190,7 @@ export async function checkCampaigns(browser, origin, mount, { observationId, pe
     const verify = Promise.withResolvers()
     await page.route('**/api/v1/me', async route => { await verify.promise; await route.fallback() }, { times: 1 })
     await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-    await expect(page.getByText('Checking your session…')).toBeVisible()
+    await expect(page.getByText('Verifying access…')).toBeVisible()
     const created = page.waitForResponse(res => res.request().method() === 'PATCH' && res.url().endsWith('/campaigns/' + id))
     saveResponse.resolve()
     await (await created).finished()

@@ -4,7 +4,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Dialog } from 'radix-ui'
-import { useEffect, useRef, useState } from 'react'
+import { Activity as SessionActivity, useEffect, useRef, useState } from 'react'
 import type { FormEvent, MouseEvent, ReactNode } from 'react'
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router'
 import { Message, Problem } from '../components/states'
@@ -17,6 +17,9 @@ import { Campaigns } from './campaigns'
 import { Run } from './run'
 import { ChatGPTSettings } from './chatgpt-settings'
 import { Register } from './register'
+import { Overview, Research } from './analyst-pages'
+import { WorkspaceHelp } from './workspace-help'
+import { OperationalPage } from './operational-pages'
 
 type Page = {
   title: string
@@ -66,8 +69,8 @@ function Unavailable({ page, session }: { page: Page; session: Session }) {
   </div>
 }
 
-export function Workspace({ session, appearance, accountAction }: {
-  session: Session; appearance: Appearance; accountAction: ReactNode
+export function Workspace({ session, appearance, accountAction, checking, sessionNotice }: {
+  session: Session; appearance: Appearance; accountAction: ReactNode; checking: boolean; sessionNotice: ReactNode
 }) {
   const location = useLocation()
   const navigate = useNavigate()
@@ -85,6 +88,7 @@ export function Workspace({ session, appearance, accountAction }: {
   const searchRecords = can(session, 'records:read')
   const primaryPath = searchRecords ? '/records' : '/help'
   useEffect(() => {
+    if (checking) return
     function onKey(event: KeyboardEvent) {
       if (!(event.ctrlKey || event.metaKey) || event.altKey || event.key.toLowerCase() !== 'k') return
       if (document.querySelector('[role="dialog"]')) return
@@ -93,7 +97,7 @@ export function Workspace({ session, appearance, accountAction }: {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [checking])
   useEffect(() => {
     document.title = (currentPage?.path === '/records' ? 'Permit Register' : currentPage?.title ?? 'Workspace') + ' · SkyScrape'
   }, [currentPage])
@@ -113,16 +117,16 @@ export function Workspace({ session, appearance, accountAction }: {
 
   return <div className="app-shell">
     <a href="#main" className="skip-link" onClick={skipMain}>Skip to main content</a>
-    <aside className="rail desktop-rail"><Brand />
+    <aside className="rail desktop-rail" inert={checking} aria-hidden={checking || undefined}><Brand />
       <RailContents pages={visiblePages} session={session} appearance={appearance} accountAction={accountAction} />
     </aside>
     <div className="workspace">
-      <header className="workspace-top">
+      <header className="workspace-top" inert={checking} aria-hidden={checking || undefined}>
         <Dialog.Root open={menuOpen} onOpenChange={setMenuOpen}>
           <div className="mobile-bar"><Brand />
             <Dialog.Trigger className="button rail-button" aria-label="Open navigation"><Menu size={19} aria-hidden="true" /></Dialog.Trigger>
           </div>
-          <Dialog.Portal>
+          <SessionActivity mode={checking ? 'hidden' : 'visible'}><Dialog.Portal>
             <Dialog.Overlay className="dialog-overlay" />
             <Dialog.Content className="rail mobile-menu">
               <header className="menu-header"><Dialog.Title>Workspace</Dialog.Title>
@@ -134,7 +138,7 @@ export function Workspace({ session, appearance, accountAction }: {
                   requestAnimationFrame(() => main.current?.focus())
                 }} />
             </Dialog.Content>
-          </Dialog.Portal>
+          </Dialog.Portal></SessionActivity>
         </Dialog.Root>
         <div className="topbar">
           <div className="breadcrumbs">
@@ -145,7 +149,7 @@ export function Workspace({ session, appearance, accountAction }: {
             <Dialog.Trigger className="button global-search">
               <Search size={16} aria-hidden="true" /><span>Search workspace</span><kbd>Ctrl / ⌘ K</kbd>
             </Dialog.Trigger>
-            <Dialog.Portal>
+            <SessionActivity mode={checking ? 'hidden' : 'visible'}><Dialog.Portal>
               <Dialog.Overlay className="dialog-overlay" />
               <Dialog.Content className="dialog-sheet command-sheet" onOpenAutoFocus={event => {
                 if (!permitSearch.current) return
@@ -168,24 +172,33 @@ export function Workspace({ session, appearance, accountAction }: {
                   </li>)}
                 </ul>
               </Dialog.Content>
-            </Dialog.Portal>
+            </Dialog.Portal></SessionActivity>
           </Dialog.Root>
         </div>
       </header>
       <main id="main" tabIndex={-1} ref={main}>
-        <Routes>
+        {checking && <div className="page">{sessionNotice}</div>}
+        <SessionActivity mode={checking ? 'hidden' : 'visible'}><Routes>
           <Route path="/" element={<Navigate to={primaryPath} replace />} />
           <Route path="/records/*" element={searchRecords ? <Register session={session} />
             : <Unavailable page={{ title: 'Records', path: '/records', Icon: Table2, allowed: () => false }} session={session} />} />
           <Route path="/campaigns/*" element={can(session, 'runs:read') ? <Campaigns session={session} />
             : <Problem resource="campaigns" error={new ApiError(403)} />} />
           <Route path="/settings" element={session.chatgptSettings ? <ChatGPTSettings /> : <Problem resource="settings" error={new ApiError(403)} />} />
-          {pages.filter(page => !['/records', '/campaigns', '/settings'].includes(page.path)).map(page =>
+          <Route path="/overview" element={can(session, 'analytics:read') ? <Overview session={session} />
+            : <Problem resource="overview" error={new ApiError(403)} />} />
+          <Route path="/research" element={can(session, 'research:create') ? <Research session={session} />
+            : <Problem resource="research" error={new ApiError(403)} />} />
+          <Route path="/help" element={<WorkspaceHelp session={session} />} />
+          {(['sources', 'issues', 'exports'] as const).map(page =>
+            <Route key={page} path={'/' + page} element={can(session, `${page}:read`)
+              ? <OperationalPage page={page} session={session} /> : <Problem resource={page} error={new ApiError(403)} />} />)}
+          {pages.filter(page => page.path === '/admin').map(page =>
             <Route key={page.path} path={page.path + '/*'} element={<Unavailable page={page} session={session} />} />)}
           <Route path="/runs/:id" element={can(session, 'runs:read') ? <Run session={session} />
             : <Problem resource="run" error={new ApiError(403)} />} />
           <Route path="*" element={<div className="page"><h1>Page not found</h1><NavLink to={primaryPath} className="button">Return to workspace</NavLink></div>} />
-        </Routes>
+        </Routes></SessionActivity>
       </main>
     </div>
   </div>

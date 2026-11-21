@@ -1,7 +1,8 @@
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { LockKeyhole, LogOut } from 'lucide-react'
-import { Activity, useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
+import { flushSync } from 'react-dom'
 import { useLocation, useNavigate } from 'react-router'
 import { Brand } from '../components/brand'
 import { AppearanceControl, useAppearance } from '../components/theme'
@@ -126,12 +127,10 @@ function PrivateApp({ session, appearance, checking, checkError, endSession, rev
   </div>
 
   return <QueryClientProvider client={client}>
-    <Activity mode={checking ? 'hidden' : 'visible'}>
-      <Workspace session={session} appearance={appearance} accountAction={accountAction} />
-    </Activity>
-    {checking && <AccessStatus>{checkError !== undefined
-      ? <Problem resource="your session" error={checkError} retry={recheck} />
-      : <Loading>Checking your session…</Loading>}</AccessStatus>}
+    <Workspace session={session} appearance={appearance} accountAction={accountAction} checking={checking || signingOut}
+      sessionNotice={checkError !== undefined
+        ? <Problem resource="your session" error={checkError} retry={recheck} />
+        : <p className="muted" role="status">Verifying access…</p>} />
   </QueryClientProvider>
 }
 
@@ -144,6 +143,7 @@ export function App() {
   const pendingCheck = useRef<AbortController | null>(null)
   const verified = useRef<AbortController | null>(null)
   const restoreFocus = useRef<HTMLElement | null>(null)
+  const scroll = useRef({ x: 0, y: 0 })
   const authorized = access.kind === 'authorized'
   const checking = access.kind === 'checking'
 
@@ -158,8 +158,9 @@ export function App() {
     if (document.visibilityState !== 'visible' || pendingCheck.current) return
     const controller = new AbortController()
     pendingCheck.current = controller
-    setAccess(current => current.kind === 'checking' && current.error
+    setAccess(current => current.kind === 'authorized' || current.kind === 'checking'
       ? { kind: 'checking', session: current.session } : current)
+    const deadline = window.setTimeout(() => controller.abort(), 10_000)
     void getSession(controller.signal).then(session => {
       if (controller.signal.aborted) return
       verified.current = controller
@@ -169,7 +170,7 @@ export function App() {
       if (changed) restoreFocus.current = null
       setAccess({ kind: changed ? 'resetting' : 'authorized', session })
     }).catch((error: unknown) => {
-      if (controller.signal.aborted) return
+      if (pendingCheck.current !== controller) return
       if (!(error instanceof ApiError) || error.status >= 500 || [408, 429].includes(error.status)) {
         setAccess(current => current.kind === 'checking' ? { ...current, error } : { kind: 'problem', error })
         return
@@ -178,6 +179,7 @@ export function App() {
       setAccess(error instanceof ApiError && error.status === 401
         ? { kind: 'anonymous', expired: principal.current !== null } : { kind: 'problem', error })
     }).finally(() => {
+      window.clearTimeout(deadline)
       if (pendingCheck.current === controller) pendingCheck.current = null
     })
   }, [])
@@ -192,8 +194,14 @@ export function App() {
     function hideWorkspace() {
       verified.current?.abort()
       const focused = document.activeElement
-      if (!restoreFocus.current && focused instanceof HTMLElement) restoreFocus.current = focused
-      setAccess(current => current.kind === 'authorized' ? { kind: 'checking', session: current.session } : current)
+      if (!restoreFocus.current && focused instanceof HTMLElement) {
+        restoreFocus.current = focused
+        scroll.current = { x: window.scrollX, y: window.scrollY }
+        const main = document.getElementById('main')
+        if (main) main.style.minHeight = main.getBoundingClientRect().height + 'px'
+      }
+      // Conceal private content before the browser can paint a returning tab.
+      flushSync(() => setAccess(current => current.kind === 'authorized' ? { kind: 'checking', session: current.session } : current))
     }
     function refresh() {
       hideWorkspace()
@@ -222,7 +230,10 @@ export function App() {
     const target = restoreFocus.current
     restoreFocus.current = null
     const frame = requestAnimationFrame(() => {
+      const main = document.getElementById('main')
+      if (main) main.style.minHeight = ''
       if (target.isConnected) target.focus({ preventScroll: true })
+      window.scrollTo(scroll.current.x, scroll.current.y)
     })
     return () => cancelAnimationFrame(frame)
   }, [authorized])

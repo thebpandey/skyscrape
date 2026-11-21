@@ -67,7 +67,7 @@ export async function getSession(signal: AbortSignal): Promise<Session> {
 
 export async function signIn(email: string, password: string) {
   const response = await request('/api/auth/sign-in/email', {
-    method: 'POST',
+    method: 'POST', signal: AbortSignal.timeout(10_000),
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password, rememberMe: false }),
   })
@@ -75,7 +75,7 @@ export async function signIn(email: string, password: string) {
 }
 
 export async function signOut() {
-  const response = await request('/api/auth/sign-out', { method: 'POST' })
+  const response = await request('/api/auth/sign-out', { method: 'POST', signal: AbortSignal.timeout(10_000) })
   if (response.status !== 204) throw Error('Invalid sign-out response')
 }
 
