@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from .artifacts import stage_artifact
-from .policy import CrawlDelay, check_url
+from .policy import CrawlDelay, prepare_url
 from .protocol import CollectionFailure, collection_error, parse_object, protocol_validators
 from .retrieve import ENGINE, Budget, Retrieval, utc_now
 
@@ -91,16 +91,16 @@ def create_app(
                         retrieval = Retrieval(task, client, throttle, job.budget, html_reader)
                         document = await retrieval.get(task["url"])
                         retrieval.check_document(document.body)
-                        fields, truncated = retrieval.extract(document.body)
+                        extraction = retrieval.extract(document.body)
                     await asyncio.sleep(0)
                     if asyncio.get_running_loop().time() >= deadline:
                         raise CollectionFailure("BUDGET_EXCEEDED")
                     assert retrieval.media_type
                     manifest = stage_artifact(staging, document.body, retrieval.media_type)
                     evidence.append(manifest)
-                    observations.extend({**field, "artifactId": manifest["artifactId"]} for field in fields)
-                    if truncated:
-                        failure = CollectionFailure("PARTIAL_CONTENT")
+                    observations.extend({**field, "artifactId": manifest["artifactId"]} for field in extraction.observations)
+                    if extraction.error:
+                        failure = CollectionFailure(extraction.error)
         except asyncio.CancelledError:
             job.state = "cancelled"
             return
@@ -116,7 +116,7 @@ def create_app(
             job.finished_at = asyncio.get_running_loop().time()
 
         result = {
-            **job.identity, "classification": "success" if failure is None else "partial" if observations else "failed",
+            **job.identity, "classification": "success" if failure is None else "partial" if evidence else "failed",
             "retrievedAt": utc_now(),
             "redirects": retrieval.redirects if retrieval else [],
             "engineVersion": ENGINE,
@@ -206,7 +206,7 @@ def create_app(
 
         if task["mode"] not in MODES:
             raise CollectionFailure("POLICY_BLOCKED", 403)
-        hostname = check_url(task, task["url"])
+        hostname, _ = prepare_url(task, task["url"])
         if set(task["permissions"]["allowedDomains"]) != {hostname}:
             raise CollectionFailure("POLICY_BLOCKED", 403)
         try:

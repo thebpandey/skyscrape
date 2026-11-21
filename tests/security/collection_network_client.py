@@ -10,13 +10,13 @@ import httpx
 ACTUAL = "/internal/v1/tasks"
 
 
-def run(client, name, url, mode, recipe, domain="data.austintexas.gov", limit=4096):
+def run(client, name, url, mode, recipe, domain="data.austintexas.gov", limit=4096, seconds=25):
     payload = {
         "protocolVersion": 1, "taskId": name, "attemptId": "one", "runId": "synthetic",
         "correlationId": "synthetic", "sourceId": "synthetic_source", "sourceVersion": "1",
         "recipeVersion": "1", "mode": mode, "url": url, "allowedMethods": [mode], "recipe": recipe,
         "permissions": {"assessmentId": "synthetic_fixture", "allowedDomains": [domain]},
-        "deadline": (datetime.now(UTC) + timedelta(seconds=25)).isoformat().replace("+00:00", "Z"),
+        "deadline": (datetime.now(UTC) + timedelta(seconds=seconds)).isoformat().replace("+00:00", "Z"),
         "limits": {"requests": 3, "bytes": limit, "browserSeconds": 0, "quotaUnits": 3, "costMicros": 0},
     }
     submit = client.post(ACTUAL, json=payload)
@@ -86,6 +86,12 @@ with httpx.Client(
                  "structured", seattle, domain="data.seattle.gov")
     assert denied["error"]["code"] == "SOURCE_ACCESS_DENIED" and denied["evidence"] == []
     assert denied["counters"]["requests"] == 1
+    throttled = run(client, "synthetic_429", "https://data.austintexas.gov/d/3syk-w9eu", "html", html, limit=8)
+    assert throttled["error"]["code"] == "RATE_LIMITED"
+    assert throttled["counters"]["bytes"] == 8 and throttled["counters"]["requests"] == 1
+    blocked = run(client, "synthetic_retry_wait", austin_data, "structured", permit, seconds=1)
+    assert blocked["error"]["code"] == "BUDGET_EXCEEDED" and blocked["counters"]["requests"] == 0
 
 print("PASS authenticated Unix socket, structured TLS, Scrapling HTTP, one-request byte cap, and private artifacts")
+print("PASS municipal projection and publisher Retry-After are enforced across retrieval modes")
 print("PASS redirects remain in-source and proxy blocks the internal canary")

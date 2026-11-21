@@ -1,16 +1,19 @@
+import { execFile } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { expect, test } from "vitest";
-import { createCollectionClient } from "../../packages/connectors/src/collection-client/index.js";
-import { taskRequest } from "../../packages/contracts/src/collection/index.js";
+import { taskRequest } from "../../packages/contracts/src/collection/index.ts";
 
 const token = "synthetic-only-secret-for-uds-check";
 const fixtureDirectory = new URL("../fixtures/contracts/collection/", import.meta.url);
+const clientEntry = new URL("../../packages/connectors/src/collection-client/index.ts", import.meta.url);
+const runNode = promisify(execFile);
 
-test("the client exchanges and validates attempt identities over a local Unix socket", async () => {
+test("the native Node client exchanges and validates attempt identities over a Unix socket", async () => {
   const directory = await mkdtemp(join(tmpdir(), "c-"));
   const socketPath = join(directory, "c.sock");
   const request = taskRequest.parse(JSON.parse(await readFile(new URL("request.json", fixtureDirectory), "utf8")));
@@ -31,10 +34,19 @@ test("the client exchanges and validates attempt identities over a local Unix so
   try {
     server.listen(socketPath);
     await once(server, "listening");
-    const collector = createCollectionClient({ socketPath, token });
-    await expect(collector.submit(request)).resolves.toMatchObject({ state: "accepted" });
-    await expect(collector.status(request.taskId, request.attemptId)).resolves.toMatchObject({ state: "finished" });
-    await expect(collector.status(request.taskId, "wrong-attempt")).rejects.toThrow("different attempt");
+    await runNode(process.execPath, [
+      "--input-type=module", "--eval", `
+        import assert from "node:assert/strict";
+        const [clientEntry, socketPath, token, input] = process.argv.slice(1);
+        const { createCollectionClient } = await import(clientEntry);
+        const request = JSON.parse(input);
+        const collector = createCollectionClient({ socketPath, token });
+        assert.equal((await collector.submit(request)).state, "accepted");
+        assert.equal((await collector.status(request.taskId, request.attemptId)).state, "finished");
+        await assert.rejects(collector.status(request.taskId, "wrong-attempt"), /different attempt/);
+      `,
+      clientEntry.href, socketPath, token, JSON.stringify(request),
+    ], { env: { ...process.env, NODE_OPTIONS: "" }, timeout: 4_000 });
     expect(seen).toEqual([
       { url: "/internal/v1/tasks", authorization: `Bearer ${token}` },
       { url: `/internal/v1/tasks/${request.taskId}?attemptId=${request.attemptId}`, authorization: `Bearer ${token}` },

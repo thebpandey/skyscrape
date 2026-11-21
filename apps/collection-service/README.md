@@ -9,7 +9,7 @@ docker compose --project-directory . -f infra/compose/collection-network.yaml \
 
 For a combined private deployment, pass `-f compose.yaml` first and the caller's Compose fragment last. Mount `collector_socket` at `/run/collection` and `collector_artifacts` at `/var/staging/collection` read-only in the caller. Give the caller supplemental group 10001 and supply the same private service token. Keep the caller, database, and LLM gateway off the collection networks. The collector has no host port and joins only `collection_private`. [Network and DNS requirements](../../infra/egress/README.md)
 
-Use `createCollectionClient({ socketPath, token })` from `packages/connectors/src/collection-client` with `/run/collection/collection.sock`. The client validates each payload against the shared collection protocol. Every operation requires the bearer credential.
+Use `createCollectionClient({ socketPath, token })` from `packages/connectors/src/collection-client/index.ts` with `/run/collection/collection.sock`. The client validates each payload against the shared collection protocol. Every operation requires the bearer credential.
 
 | Operation | Method and path |
 | --- | --- |
@@ -23,5 +23,7 @@ Use the task ID as `:id`. Omit `attemptId` to select the most recently admitted 
 Resolve an artifact ID relative to the staging directory. Before promotion, verify that it names a regular file with the expected type, size, and SHA-256. Keep staging files private. The shared staging volume is a 128 MiB tmpfs. Promote evidence while the service and an authorized caller mount the volume. The collector removes its staging files older than 30 minutes when it stages new evidence.
 
 Structured mode accepts the assessed Austin and Seattle JSON endpoints and the Census county CSV-shaped download. HTML mode accepts the Austin and Seattle dataset pages. A task supplies its source assessment and bounded extraction recipe. The collector enforces the host, path, mode, egress policy, and one-second request spacing per publisher. Each attempt is limited to 8 MiB of response data and 128 observations. Browser mode, session-based retrieval, and the live Census file parser remain pending qualification. [Qualification record](../../docs/scrapling-evaluation.md)
+
+Every municipal request, including a redirect, selects only approved recipe fields. Responses with extra fields are rejected before staging. A publisher's `Retry-After` on HTTP 429 delays subsequent requests to that host across tasks in the running collector. An attempt that expires while waiting consumes no request quota. Valid HTML matches remain available in a partial result when other selectors are missing or ambiguous. Values longer than the v1 observation limit are available in the private artifact and omitted from the inline partial result.
 
 Run `bash tests/security/collection_network.sh` from the repository root for an isolated check with synthetic TLS, DNS, and publishers. Use the command with Docker Engine 28 or later and Compose 2.36 or later. The fixture publishes no ports. [Task schema](../../packages/contracts/src/collection/v1.schema.json)

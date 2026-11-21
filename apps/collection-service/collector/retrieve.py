@@ -17,7 +17,7 @@ from scrapling import Selector
 from scrapling.core.utils import log as scrapling_log
 from scrapling.fetchers import AsyncFetcher
 
-from .policy import CrawlDelay, check_url
+from .policy import CrawlDelay, prepare_url
 from .protocol import CollectionFailure
 
 
@@ -25,6 +25,7 @@ PROXY = "http://collection-egress:3128"
 ENGINE = f"scrapling-{version('scrapling')}"
 MAX_BYTES = 8 * 1024 * 1024
 MAX_OBSERVATIONS = 128
+MAX_ORIGINAL_LENGTH = 2048
 REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 
 
@@ -66,6 +67,12 @@ class PageResponse:
 
 
 @dataclass
+class Extraction:
+    observations: list[dict]
+    error: str | None
+
+
+@dataclass
 class Retrieval:
     task: dict
     client: httpx.AsyncClient
@@ -104,20 +111,21 @@ class Retrieval:
             await response.aclose()
 
     async def get(self, url: str) -> PageResponse:
+        hostname, url = prepare_url(self.task, url)
         for redirect_count in range(11):
-            hostname = check_url(self.task, url)
-            await self.throttle.wait(hostname)
-            self.budget.begin_request()
-            if self.task["mode"] == "html" and self.html_reader:
-                response = await self.html_reader(url, self.budget)
-            else:
-                response = await self.read_native(url)
+            async with self.throttle.request(hostname):
+                self.budget.begin_request()
+                if self.task["mode"] == "html" and self.html_reader:
+                    response = await self.html_reader(url, self.budget)
+                else:
+                    response = await self.read_native(url)
+                if response.status == 429 and "retry-after" in response.headers:
+                    self.throttle.defer(hostname, response.headers["retry-after"])
             self.record_response(url, response)
             if response.status in REDIRECT_STATUSES:
                 if redirect_count == 10 or "location" not in response.headers:
                     raise CollectionFailure("POLICY_BLOCKED", 403)
-                url = urljoin(url, response.headers["location"])
-                check_url(self.task, url)
+                hostname, url = prepare_url(self.task, urljoin(url, response.headers["location"]))
                 self.redirects.append(url)
                 continue
             self.check_status()
@@ -176,16 +184,16 @@ class Retrieval:
             raise CollectionFailure("PARSE_FAILED")
         self.content = "expected"
 
-    def extract(self, body: bytes) -> tuple[list[dict], bool]:
+    def extract(self, body: bytes) -> Extraction:
         projection = self.task["recipe"]["fields"]
-        if self.task["mode"] != "structured":
+        html = self.task["mode"] == "html"
+        if html:
             selector = Selector(body, adaptive=False, huge_tree=False)
             values = []
             for field in projection:
                 matches = selector.css(field["selector"])
-                if len(matches) == 1:
-                    selected = matches[0]
-                    values.append((field["field"], selected.get_all_text(separator=" ", strip=True), field["selector"]))
+                value = matches[0].get_all_text(separator=" ", strip=True) if len(matches) == 1 else None
+                values.append((field["field"], value, field["selector"]))
             rows = iter(values)
         else:
             try:
@@ -194,6 +202,10 @@ class Retrieval:
                     records = data if isinstance(data, list) else [data]
                     if any(not isinstance(record, dict) for record in records):
                         raise ValueError
+                    projected_keys = {field["key"] for field in projection}
+                    if any(record.keys() - projected_keys for record in records):
+                        self.content = "unexpected"
+                        raise CollectionFailure("POLICY_BLOCKED", 403)
                 else:
                     records = list(csv.DictReader(io.StringIO(body.decode("utf-8-sig"))))
             except (ValueError, csv.Error):
@@ -205,20 +217,30 @@ class Retrieval:
             )
 
         observations = []
+        source_changed = False
+        limited = False
         for name, value, locator in rows:
             if isinstance(value, (float, int, bool)):
                 if isinstance(value, float) and not math.isfinite(value):
                     continue
                 value = json.dumps(value)
-            if isinstance(value, str) and value.strip():
-                if len(observations) == MAX_OBSERVATIONS:
-                    return observations, True
-                observations.append({"field": name, "original": value.strip()[:2048], "locator": locator})
-        if not observations:
-            self.content = "empty" if self.task["mode"] == "structured" and not records else "unexpected"
+            if not isinstance(value, str) or not value.strip():
+                source_changed |= html
+                continue
+            # The TypeScript contract applies its string cap in UTF-16 code units.
+            if len(value) > MAX_ORIGINAL_LENGTH or len(value.encode("utf-16-le")) > 2 * MAX_ORIGINAL_LENGTH:
+                limited = True
+                continue
+            if len(observations) == MAX_OBSERVATIONS:
+                limited = True
+                break
+            observations.append({"field": name, "original": value.strip(), "locator": locator})
+        if not observations and not limited:
+            self.content = "empty" if not html and not records else "unexpected"
             code = "EMPTY_CONTENT" if self.content == "empty" else "SOURCE_CHANGED"
             raise CollectionFailure(code)
-        return observations, False
+        error = "SOURCE_CHANGED" if source_changed else "PARTIAL_CONTENT" if limited else None
+        return Extraction(observations, error)
 
 
 async def fetch_html(url: str, budget: Budget, ca_file: str) -> PageResponse:
@@ -244,13 +266,16 @@ async def fetch_html(url: str, budget: Budget, ca_file: str) -> PageResponse:
             headers={"User-Agent": "Skyscrape-Collection/1.0"}, discard_cookies=True,
             content_callback=receive, selector_config={"adaptive": False, "huge_tree": False},
         )
-    except CurlError:
+    except CurlError as error:
+        failed = getattr(error, "response", None)
+        if failed is not None and failed.status_code == 429:
+            return PageResponse(b"", {name.lower(): value for name, value in failed.headers.items()}, 429)
         failure = CollectionFailure("BUDGET_EXCEEDED") if limited else CollectionFailure(
             "SOURCE_ACCESS_DENIED", retryable=True,
         )
         raise failure from None
     headers = {name.lower(): value for name, value in response.headers.items()}
-    if headers.get("content-encoding", "identity").lower() != "identity":
+    if response.status < 300 and headers.get("content-encoding", "identity").lower() != "identity":
         raise CollectionFailure("PARSE_FAILED")
     return PageResponse(bytes(body), headers, response.status)
 

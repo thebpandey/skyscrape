@@ -7,6 +7,7 @@ import os
 import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
+from email.utils import format_datetime
 from pathlib import Path
 
 import httpx
@@ -88,7 +89,7 @@ class CollectionServiceTest(unittest.IsolatedAsyncioTestCase):
             validators[kind].validate(json.loads((FIXTURES / filename).read_bytes()))
 
     async def test_authorized_idempotent_collection_and_staging(self):
-        body = b'[{"permit_number":"SYNTHETIC-12","salary_private":"never an observation"}]'
+        body = b'[{"permit_number":" SYNTHETIC-12 "}]'
         expired = self.artifacts / ("0" * 32)
         expired.write_bytes(b"synthetic expired artifact")
         os.utime(expired, (0, 0))
@@ -110,7 +111,7 @@ class CollectionServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(conflicting.status_code, 409)
         result = (await self.terminal(client, task))["result"]
         self.assertEqual(result["classification"], "success", result)
-        self.assertEqual(self.calls, [DATA])
+        self.assertEqual(self.calls, [f"{DATA}?%24select=permit_number"])
         artifact = result["evidence"][0]
         self.assertEqual((self.artifacts / artifact["artifactId"]).read_bytes(), body)
         self.assertFalse(expired.exists())
@@ -142,8 +143,105 @@ class CollectionServiceTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["error"]["code"], code, result)
             self.assertEqual(result["counters"]["requests"], count)
             self.assertEqual(result["evidence"], [])
-        self.assertEqual(self.calls, [f"{DATA}?%24limit=1", DATA])
+        self.assertEqual(self.calls, [f"{DATA}?%24limit=1&%24select=permit_number", f"{DATA}?%24select=permit_number"])
         self.assertEqual(list(self.artifacts.iterdir()), [])
+
+    async def test_municipal_projection_on_each_request_and_redirect(self):
+        seattle = "https://data.seattle.gov/resource/76t5-zqzr.json"
+
+        async def respond(call):
+            if call.url.params.get("$offset") == "0":
+                return httpx.Response(302, headers={"Location": f"{seattle}?%24offset=1&%24select=issueddate"})
+            body = (b'[{"permitnum":"SYNTHETIC","excluded":"outside projection"}]'
+                    if call.url.params.get("$offset") == "2" else b'[{"permitnum":"SYNTHETIC"}]')
+            return httpx.Response(200, headers={"Content-Type": "application/json"}, stream=Chunks(body))
+
+        client = await self.api(respond)
+        task = request(
+            url=f"{seattle}?%24offset=0",
+            permissions={"assessmentId": "synthetic", "allowedDomains": ["data.seattle.gov"]},
+            recipe={"format": "json", "fields": [{"field": "permitNumber", "key": "permitnum"}]},
+            limits={**request()["limits"], "requests": 2, "quotaUnits": 2},
+        )
+        self.assertEqual((await client.post(TASKS, json=task)).status_code, 202)
+        result = (await self.terminal(client, task))["result"]
+        projected = f"{seattle}?%24offset=1&%24select=permitnum"
+        self.assertEqual(result["classification"], "success", result)
+        self.assertEqual(self.calls, [f"{seattle}?%24offset=0&%24select=permitnum", projected])
+        self.assertEqual(result["finalUrl"], projected)
+        self.assertEqual(result["redirects"], [projected])
+
+        unprojected = {**task, "taskId": "extra_field", "url": f"{seattle}?%24offset=2"}
+        self.assertEqual((await client.post(TASKS, json=unprojected)).status_code, 202)
+        result = (await self.terminal(client, unprojected))["result"]
+        self.assertEqual(result["error"]["code"], "POLICY_BLOCKED")
+        self.assertEqual(result["evidence"], [])
+        self.assertEqual(len(list(self.artifacts.iterdir())), 1)
+
+    async def test_publisher_retry_after_blocks_other_tasks_at_that_host(self):
+        for header in ("60", format_datetime(datetime.now(UTC) + timedelta(minutes=1), usegmt=True)):
+            with self.subTest(retry_after=header):
+                self.calls.clear()
+                started, release = asyncio.Event(), asyncio.Event()
+
+                async def respond(_):
+                    started.set()
+                    await release.wait()
+                    return httpx.Response(429, headers={"Retry-After": header})
+
+                client = await self.api(respond)
+                first = request(taskId="first")
+                self.assertEqual((await client.post(TASKS, json=first)).status_code, 202)
+                await asyncio.wait_for(started.wait(), 2)
+                second_deadline = (datetime.now(UTC) + timedelta(seconds=0.4)).isoformat().replace("+00:00", "Z")
+                next_task = request(taskId="next", deadline=second_deadline)
+                self.assertEqual((await client.post(TASKS, json=next_task)).status_code, 202)
+                release.set()
+
+                result = (await self.terminal(client, first))["result"]
+                self.assertEqual(result["error"]["code"], "RATE_LIMITED")
+                waiting = (await self.terminal(client, next_task))["result"]
+                self.assertEqual(waiting["error"]["code"], "BUDGET_EXCEEDED")
+                self.assertEqual(waiting["counters"]["requests"], 0)
+                self.assertEqual(len(self.calls), 1)
+
+    async def test_preserves_unique_html_matches_and_flags_recipe_drift(self):
+        body = b'<p id="present">Synthetic public label</p><i class="multiple">1</i><i class="multiple">2</i>'
+
+        async def respond(_):
+            return httpx.Response(200, headers={"Content-Type": "text/html"}, stream=Chunks(body))
+
+        client = await self.api(respond)
+        task = request(
+            mode="html", allowedMethods=["html"], url=PAGE,
+            recipe={"fields": [
+                {"field": "present", "selector": "#present"},
+                {"field": "missing", "selector": "#absent"},
+                {"field": "ambiguous", "selector": ".multiple"},
+            ]},
+        )
+        self.assertEqual((await client.post(TASKS, json=task)).status_code, 202)
+        result = (await self.terminal(client, task))["result"]
+        self.assertEqual(result["classification"], "partial", result)
+        self.assertEqual(result["error"]["code"], "SOURCE_CHANGED")
+        self.assertEqual([field["field"] for field in result["observations"]], ["present"])
+        self.assertEqual(result["observations"][0]["original"], "Synthetic public label")
+        self.assertEqual((self.artifacts / result["evidence"][0]["artifactId"]).read_bytes(), body)
+
+    async def test_stages_intact_artifact_without_truncating_overlong_field(self):
+        body = json.dumps([{"description": "x" * 2049 + "tail"}]).encode()
+
+        async def respond(_):
+            return httpx.Response(200, headers={"Content-Type": "application/json"}, stream=Chunks(body))
+
+        client = await self.api(respond)
+        task = request(recipe={"format": "json", "fields": [{"field": "description", "key": "description"}]})
+        self.assertEqual((await client.post(TASKS, json=task)).status_code, 202)
+        result = (await self.terminal(client, task))["result"]
+        self.assertEqual(result["classification"], "partial", result)
+        self.assertEqual(result["error"]["code"], "PARTIAL_CONTENT")
+        self.assertEqual(result["observations"], [])
+        self.assertEqual((self.artifacts / result["evidence"][0]["artifactId"]).read_bytes(), body)
 
     async def test_classifies_challenge_and_missing_selector_without_staging(self):
         async def respond(_):

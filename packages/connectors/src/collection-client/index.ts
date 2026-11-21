@@ -8,15 +8,20 @@ import {
   taskAccepted,
   taskRequest,
   taskStatus,
-} from "../../../contracts/src/collection/index.js";
-import type { CollectionError, TaskRequest } from "../../../contracts/src/collection/index.js";
+} from "../../../contracts/src/collection/index.ts";
+import type { CollectionError, TaskRequest } from "../../../contracts/src/collection/index.ts";
 
 const maxResponseBytes = 2 * 1024 * 1024;
 
 export class CollectionServiceError extends Error {
-  constructor(readonly status: number, readonly detail: CollectionError) {
+  readonly status: number;
+  readonly detail: CollectionError;
+
+  constructor(status: number, detail: CollectionError) {
     super(detail.message);
     this.name = "CollectionServiceError";
+    this.status = status;
+    this.detail = detail;
   }
 }
 

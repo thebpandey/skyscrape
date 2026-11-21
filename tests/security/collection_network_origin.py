@@ -14,7 +14,11 @@ class Publisher(BaseHTTPRequestHandler):
         if host == "data.seattle.gov":
             Path("/fixture/canary-reached").touch()
         if url.path.startswith("/resource/"):
-            if parse_qs(url.query).get("$offset") == ["9"]:
+            query = parse_qs(url.query)
+            if host == "data.austintexas.gov" and query.get("$select") != ["permit_number"]:
+                self.send_error(400)
+                return
+            if query.get("$offset") == ["9"]:
                 self.send_response(302)
                 self.send_header("Location", "https://data.seattle.gov/resource/76t5-zqzr.json")
                 self.end_headers()
@@ -24,7 +28,10 @@ class Publisher(BaseHTTPRequestHandler):
         else:
             body = b'<main><p id="permit-label">Synthetic public label</p></main>'
             media_type = "text/html"
-        self.send_response(200)
+        limited = url.path == "/d/3syk-w9eu"
+        self.send_response(429 if limited else 200)
+        if limited:
+            self.send_header("Retry-After", "60")
         self.send_header("Content-Type", media_type)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()

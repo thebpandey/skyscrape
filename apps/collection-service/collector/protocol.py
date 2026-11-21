@@ -44,7 +44,7 @@ MESSAGES = {
     "FREE_QUOTA_EXHAUSTED": ("Free request quota was exhausted", "Wait for a qualified free quota"),
     "INTERNAL_ERROR": ("Collection could not complete", "Check collector health and the correlation ID"),
     "PARSE_FAILED": ("The response could not be parsed", "Review the expected response format"),
-    "PARTIAL_CONTENT": ("The response exceeded the observation limit", "Collect a smaller page"),
+    "PARTIAL_CONTENT": ("Collection reached a response or observation limit", "Review the evidence and attempt limits"),
     "POLICY_BLOCKED": ("Collection policy denied the request", "Review the qualified source and attempt policy"),
     "RATE_LIMITED": ("The source or collector is at capacity", "Wait before attempting another request"),
     "SCHEMA_MISMATCH": ("The request does not match the collection protocol", "Check the request schema"),
