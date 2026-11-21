@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { collectionSchema, taskRequest, taskResult } from "../src/collection/index.ts";
+import { collectionError, collectionSchema, taskRequest, taskResult } from "../src/collection/index.ts";
 import { collectionSchema as generated } from "../src/collection/schema.ts";
 
 const fixture = (name: string) => JSON.parse(readFileSync(
@@ -23,4 +23,30 @@ test("a recipe rejects an unrecognized operation", () => {
   const request = fixture("request");
   request.recipe.evaluate = "untrusted";
   assert.equal(taskRequest.safeParse(request).success, false);
+});
+
+test("a successful result requires a final URL", () => {
+  const result = fixture("result");
+  delete result.finalUrl;
+  assert.equal(taskResult.safeParse(result).success, false);
+});
+
+for (const field of ["evidence", "observations"]) {
+  test(`a successful result rejects empty ${field}`, () => {
+    assert.equal(taskResult.safeParse({ ...fixture("result"), [field]: [] }).success, false);
+  });
+}
+
+test("a collection error carries the provenance that is known", () => {
+  const { sourceId, runId, taskId, correlationId } = fixture("request");
+  const error = {
+    code: "SOURCE_CHANGED", message: "Field is missing", retryable: false, correlationId,
+    action: "Extract field", outcome: "Field absent", nextAction: "Review connector",
+  };
+  const contextual = { ...error, provenance: { sourceId, runId, taskId, connectorVersion: "2026.1" } };
+  assert.deepEqual(collectionError.parse(contextual), contextual);
+  const unknownTask = { ...error, code: "UNKNOWN_TASK" };
+  const partialContext = { ...unknownTask, provenance: { runId } };
+  assert.deepEqual(collectionError.parse(partialContext), partialContext);
+  assert.deepEqual(collectionError.parse(unknownTask), unknownTask);
 });

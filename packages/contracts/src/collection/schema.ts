@@ -54,6 +54,9 @@ export const collectionError = z.strictObject({
     "UNKNOWN_TASK", "UNSUPPORTED_PROTOCOL_VERSION"]),
   message, retryable: z.boolean(), correlationId: id, action: message, outcome: message,
   hypothesis: message.optional(), nextAction: message,
+  provenance: z.strictObject({
+    sourceId: id.optional(), runId: id.optional(), taskId: id.optional(), connectorVersion: revision.optional(),
+  }).optional(),
 }).meta({ id: "CollectionError" });
 const manifest = {
   ...identity, finalUrl: url.optional(), redirects: z.array(url).max(10), retrievedAt: time,
@@ -61,8 +64,9 @@ const manifest = {
   evidence: z.array(evidence).max(32), observations: z.array(observation).max(128),
 };
 export const taskResult = z.discriminatedUnion("classification", [
-  z.strictObject({ ...manifest, classification: z.literal("success"),
-    evidence: manifest.evidence.min(1), observations: manifest.observations.min(1) }),
+  z.strictObject({ ...manifest, classification: z.literal("success"), finalUrl: url,
+    evidence: z.array(evidence).min(1).max(32).meta({ id: "SuccessEvidence" }),
+    observations: z.array(observation).min(1).max(128).meta({ id: "SuccessObservations" }) }),
   z.strictObject({ ...manifest, classification: z.enum(["partial", "failed"]), error: collectionError }),
 ]).meta({ id: "TaskResult" });
 
