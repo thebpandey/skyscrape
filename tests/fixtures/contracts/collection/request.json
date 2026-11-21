@@ -1,0 +1,17 @@
+{
+  "protocolVersion": 1,
+  "taskId": "task_parcel_12",
+  "attemptId": "attempt_1",
+  "runId": "run_23",
+  "correlationId": "corr_23",
+  "sourceId": "county_parcels",
+  "sourceVersion": "2026.1",
+  "recipeVersion": "1.0",
+  "mode": "structured",
+  "url": "https://records.example.org/parcels.json",
+  "permissions": { "assessmentId": "approved_parcels_1", "allowedDomains": ["records.example.org"] },
+  "allowedMethods": ["structured"],
+  "deadline": "2026-12-01T18:01:00Z",
+  "limits": { "requests": 1, "bytes": 65536, "browserSeconds": 0, "quotaUnits": 1, "costMicros": 0 },
+  "recipe": { "format": "json", "fields": [{ "field": "parcelId", "key": "parcel_id" }] }
+}

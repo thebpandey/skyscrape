@@ -1,0 +1,989 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/TaskRequest"
+    },
+    {
+      "$ref": "#/$defs/TaskAccepted"
+    },
+    {
+      "$ref": "#/$defs/TaskStatus"
+    },
+    {
+      "$ref": "#/$defs/TaskResult"
+    },
+    {
+      "$ref": "#/$defs/CancelAcknowledgement"
+    },
+    {
+      "$ref": "#/$defs/Health"
+    },
+    {
+      "$ref": "#/$defs/CollectionError"
+    }
+  ],
+  "$defs": {
+    "TaskRequest": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/__schema0"
+        },
+        {
+          "$ref": "#/$defs/__schema12"
+        },
+        {
+          "$ref": "#/$defs/__schema15"
+        }
+      ]
+    },
+    "__schema0": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "$ref": "#/$defs/__schema1"
+        },
+        "taskId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "attemptId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "correlationId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "sourceId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "sourceVersion": {
+          "$ref": "#/$defs/__schema2"
+        },
+        "recipeVersion": {
+          "$ref": "#/$defs/__schema2"
+        },
+        "url": {
+          "$ref": "#/$defs/SourceUrl"
+        },
+        "deadline": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "limits": {
+          "$ref": "#/$defs/Counters"
+        },
+        "permissions": {
+          "$ref": "#/$defs/__schema8"
+        },
+        "mode": {
+          "type": "string",
+          "const": "structured"
+        },
+        "allowedMethods": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "string",
+              "const": "structured"
+            }
+          ],
+          "items": false,
+          "minItems": 1,
+          "maxItems": 1
+        },
+        "recipe": {
+          "type": "object",
+          "properties": {
+            "format": {
+              "type": "string",
+              "enum": [
+                "json",
+                "csv"
+              ]
+            },
+            "fields": {
+              "minItems": 1,
+              "maxItems": 32,
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema10"
+              }
+            }
+          },
+          "required": [
+            "format",
+            "fields"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "taskId",
+        "attemptId",
+        "runId",
+        "correlationId",
+        "sourceId",
+        "sourceVersion",
+        "recipeVersion",
+        "url",
+        "deadline",
+        "limits",
+        "permissions",
+        "mode",
+        "allowedMethods",
+        "recipe"
+      ],
+      "additionalProperties": false
+    },
+    "__schema1": {
+      "type": "number",
+      "const": 1
+    },
+    "Identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100,
+      "pattern": "^[a-zA-Z0-9_-]+$"
+    },
+    "__schema2": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "SourceUrl": {
+      "type": "string",
+      "maxLength": 2048,
+      "pattern": "^https?:\\/\\/(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?(?:[/?][^\\s\\\\#]*)?$"
+    },
+    "UtcTimestamp": {
+      "type": "string",
+      "maxLength": 40,
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+    },
+    "Counters": {
+      "type": "object",
+      "properties": {
+        "requests": {
+          "$ref": "#/$defs/__schema3"
+        },
+        "bytes": {
+          "$ref": "#/$defs/__schema4"
+        },
+        "browserSeconds": {
+          "$ref": "#/$defs/__schema5"
+        },
+        "quotaUnits": {
+          "$ref": "#/$defs/__schema6"
+        },
+        "costMicros": {
+          "$ref": "#/$defs/__schema7"
+        }
+      },
+      "required": [
+        "requests",
+        "bytes",
+        "browserSeconds",
+        "quotaUnits",
+        "costMicros"
+      ],
+      "additionalProperties": false
+    },
+    "__schema3": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 256
+    },
+    "__schema4": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000000
+    },
+    "__schema5": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 600
+    },
+    "__schema6": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 256
+    },
+    "__schema7": {
+      "type": "number",
+      "const": 0
+    },
+    "__schema8": {
+      "type": "object",
+      "properties": {
+        "assessmentId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "allowedDomains": {
+          "minItems": 1,
+          "maxItems": 16,
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema9"
+          }
+        }
+      },
+      "required": [
+        "assessmentId",
+        "allowedDomains"
+      ],
+      "additionalProperties": false
+    },
+    "__schema9": {
+      "type": "string",
+      "maxLength": 253,
+      "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+    },
+    "__schema10": {
+      "type": "object",
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        }
+      },
+      "required": [
+        "field",
+        "key"
+      ],
+      "additionalProperties": false
+    },
+    "__schema11": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+    },
+    "__schema12": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "$ref": "#/$defs/__schema1"
+        },
+        "taskId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "attemptId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "correlationId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "sourceId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "sourceVersion": {
+          "$ref": "#/$defs/__schema2"
+        },
+        "recipeVersion": {
+          "$ref": "#/$defs/__schema2"
+        },
+        "url": {
+          "$ref": "#/$defs/SourceUrl"
+        },
+        "deadline": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "limits": {
+          "$ref": "#/$defs/Counters"
+        },
+        "permissions": {
+          "$ref": "#/$defs/__schema8"
+        },
+        "mode": {
+          "type": "string",
+          "const": "html"
+        },
+        "allowedMethods": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "string",
+              "const": "html"
+            }
+          ],
+          "items": false,
+          "minItems": 1,
+          "maxItems": 1
+        },
+        "recipe": {
+          "type": "object",
+          "properties": {
+            "fields": {
+              "$ref": "#/$defs/__schema13"
+            }
+          },
+          "required": [
+            "fields"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "taskId",
+        "attemptId",
+        "runId",
+        "correlationId",
+        "sourceId",
+        "sourceVersion",
+        "recipeVersion",
+        "url",
+        "deadline",
+        "limits",
+        "permissions",
+        "mode",
+        "allowedMethods",
+        "recipe"
+      ],
+      "additionalProperties": false
+    },
+    "__schema13": {
+      "minItems": 1,
+      "maxItems": 32,
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/__schema14"
+      }
+    },
+    "__schema14": {
+      "type": "object",
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "selector": {
+          "$ref": "#/$defs/SimpleSelector"
+        }
+      },
+      "required": [
+        "field",
+        "selector"
+      ],
+      "additionalProperties": false
+    },
+    "SimpleSelector": {
+      "type": "string",
+      "maxLength": 80,
+      "pattern": "^[.#]?[a-zA-Z][a-zA-Z0-9_-]*$"
+    },
+    "__schema15": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "$ref": "#/$defs/__schema1"
+        },
+        "taskId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "attemptId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "runId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "correlationId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "sourceId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "sourceVersion": {
+          "$ref": "#/$defs/__schema2"
+        },
+        "recipeVersion": {
+          "$ref": "#/$defs/__schema2"
+        },
+        "url": {
+          "$ref": "#/$defs/SourceUrl"
+        },
+        "deadline": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "limits": {
+          "$ref": "#/$defs/Counters"
+        },
+        "permissions": {
+          "$ref": "#/$defs/__schema8"
+        },
+        "mode": {
+          "type": "string",
+          "const": "browser"
+        },
+        "allowedMethods": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "string",
+              "const": "browser"
+            }
+          ],
+          "items": false,
+          "minItems": 1,
+          "maxItems": 1
+        },
+        "sessionRef": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "recipe": {
+          "type": "object",
+          "properties": {
+            "fields": {
+              "$ref": "#/$defs/__schema13"
+            },
+            "waitFor": {
+              "$ref": "#/$defs/SimpleSelector"
+            }
+          },
+          "required": [
+            "fields"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "taskId",
+        "attemptId",
+        "runId",
+        "correlationId",
+        "sourceId",
+        "sourceVersion",
+        "recipeVersion",
+        "url",
+        "deadline",
+        "limits",
+        "permissions",
+        "mode",
+        "allowedMethods",
+        "recipe"
+      ],
+      "additionalProperties": false
+    },
+    "TaskAccepted": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "$ref": "#/$defs/__schema1"
+        },
+        "taskId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "attemptId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "state": {
+          "$ref": "#/$defs/__schema16"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "taskId",
+        "attemptId",
+        "state"
+      ],
+      "additionalProperties": false
+    },
+    "__schema16": {
+      "type": "string",
+      "const": "accepted"
+    },
+    "TaskStatus": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/__schema17"
+        },
+        {
+          "$ref": "#/$defs/__schema18"
+        }
+      ]
+    },
+    "__schema17": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "$ref": "#/$defs/__schema1"
+        },
+        "taskId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "attemptId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "running",
+            "cancelled"
+          ]
+        },
+        "counters": {
+          "$ref": "#/$defs/Counters"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "taskId",
+        "attemptId",
+        "state",
+        "counters"
+      ],
+      "additionalProperties": false
+    },
+    "__schema18": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "$ref": "#/$defs/__schema1"
+        },
+        "state": {
+          "type": "string",
+          "const": "finished"
+        },
+        "result": {
+          "$ref": "#/$defs/TaskResult"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "state",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "TaskResult": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/__schema19"
+        },
+        {
+          "$ref": "#/$defs/__schema30"
+        }
+      ]
+    },
+    "__schema19": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "$ref": "#/$defs/__schema1"
+        },
+        "taskId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "attemptId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "finalUrl": {
+          "$ref": "#/$defs/__schema20"
+        },
+        "redirects": {
+          "$ref": "#/$defs/__schema21"
+        },
+        "retrievedAt": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "sourceTimestamp": {
+          "$ref": "#/$defs/__schema22"
+        },
+        "engineVersion": {
+          "$ref": "#/$defs/__schema2"
+        },
+        "browserVersion": {
+          "$ref": "#/$defs/__schema23"
+        },
+        "counters": {
+          "$ref": "#/$defs/Counters"
+        },
+        "evidence": {
+          "minItems": 1,
+          "$ref": "#/$defs/__schema27"
+        },
+        "observations": {
+          "minItems": 1,
+          "$ref": "#/$defs/__schema29"
+        },
+        "classification": {
+          "type": "string",
+          "const": "success"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "taskId",
+        "attemptId",
+        "redirects",
+        "retrievedAt",
+        "engineVersion",
+        "counters",
+        "evidence",
+        "observations",
+        "classification"
+      ],
+      "additionalProperties": false
+    },
+    "__schema20": {
+      "$ref": "#/$defs/SourceUrl"
+    },
+    "__schema21": {
+      "maxItems": 10,
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SourceUrl"
+      }
+    },
+    "__schema22": {
+      "$ref": "#/$defs/UtcTimestamp"
+    },
+    "__schema23": {
+      "$ref": "#/$defs/__schema2"
+    },
+    "Evidence": {
+      "type": "object",
+      "properties": {
+        "artifactId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "sha256": {
+          "$ref": "#/$defs/__schema24"
+        },
+        "bytes": {
+          "$ref": "#/$defs/__schema25"
+        },
+        "mediaType": {
+          "$ref": "#/$defs/__schema26"
+        }
+      },
+      "required": [
+        "artifactId",
+        "sha256",
+        "bytes",
+        "mediaType"
+      ],
+      "additionalProperties": false
+    },
+    "__schema24": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "__schema25": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100000000
+    },
+    "__schema26": {
+      "type": "string",
+      "enum": [
+        "text/html",
+        "text/csv",
+        "application/json",
+        "application/pdf",
+        "text/plain",
+        "image/png"
+      ]
+    },
+    "__schema27": {
+      "maxItems": 32,
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Evidence"
+      }
+    },
+    "__schema28": {
+      "type": "object",
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/__schema11"
+        },
+        "original": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "normalized": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 2048
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            }
+          ]
+        },
+        "artifactId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "locator": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "recovery": {
+          "type": "object",
+          "properties": {
+            "originalSelector": {
+              "$ref": "#/$defs/SimpleSelector"
+            },
+            "recoveredSelector": {
+              "$ref": "#/$defs/SimpleSelector"
+            },
+            "method": {
+              "type": "string",
+              "const": "adaptive"
+            },
+            "validation": {
+              "type": "string",
+              "enum": [
+                "unverified",
+                "passed",
+                "failed"
+              ]
+            }
+          },
+          "required": [
+            "originalSelector",
+            "recoveredSelector",
+            "method",
+            "validation"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "field",
+        "original",
+        "artifactId",
+        "locator"
+      ],
+      "additionalProperties": false
+    },
+    "__schema29": {
+      "maxItems": 128,
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/__schema28"
+      }
+    },
+    "__schema30": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "$ref": "#/$defs/__schema1"
+        },
+        "taskId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "attemptId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "finalUrl": {
+          "$ref": "#/$defs/__schema20"
+        },
+        "redirects": {
+          "$ref": "#/$defs/__schema21"
+        },
+        "retrievedAt": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "sourceTimestamp": {
+          "$ref": "#/$defs/__schema22"
+        },
+        "engineVersion": {
+          "$ref": "#/$defs/__schema2"
+        },
+        "browserVersion": {
+          "$ref": "#/$defs/__schema23"
+        },
+        "counters": {
+          "$ref": "#/$defs/Counters"
+        },
+        "evidence": {
+          "$ref": "#/$defs/__schema27"
+        },
+        "observations": {
+          "$ref": "#/$defs/__schema29"
+        },
+        "classification": {
+          "type": "string",
+          "enum": [
+            "partial",
+            "failed"
+          ]
+        },
+        "error": {
+          "$ref": "#/$defs/CollectionError"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "taskId",
+        "attemptId",
+        "redirects",
+        "retrievedAt",
+        "engineVersion",
+        "counters",
+        "evidence",
+        "observations",
+        "classification",
+        "error"
+      ],
+      "additionalProperties": false
+    },
+    "CollectionError": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/__schema31"
+        },
+        "message": {
+          "$ref": "#/$defs/__schema32"
+        },
+        "retryable": {
+          "$ref": "#/$defs/__schema33"
+        },
+        "correlationId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "action": {
+          "$ref": "#/$defs/__schema32"
+        },
+        "outcome": {
+          "$ref": "#/$defs/__schema32"
+        },
+        "hypothesis": {
+          "$ref": "#/$defs/__schema34"
+        },
+        "nextAction": {
+          "$ref": "#/$defs/__schema32"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "retryable",
+        "correlationId",
+        "action",
+        "outcome",
+        "nextAction"
+      ],
+      "additionalProperties": false
+    },
+    "__schema31": {
+      "type": "string",
+      "enum": [
+        "SOURCE_ACCESS_DENIED",
+        "AUTH_REQUIRED",
+        "CHALLENGE_REQUIRED",
+        "RATE_LIMITED",
+        "SOURCE_CHANGED",
+        "PAGINATION_INCOMPLETE",
+        "EMPTY_CONTENT",
+        "PARTIAL_CONTENT",
+        "PARSE_FAILED",
+        "SCHEMA_MISMATCH",
+        "FREE_QUOTA_EXHAUSTED",
+        "POLICY_BLOCKED",
+        "BUDGET_EXCEEDED",
+        "STORAGE_FAILED",
+        "INTERNAL_ERROR",
+        "UNKNOWN_TASK",
+        "UNSUPPORTED_PROTOCOL_VERSION"
+      ]
+    },
+    "__schema32": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 400
+    },
+    "__schema33": {
+      "type": "boolean"
+    },
+    "__schema34": {
+      "$ref": "#/$defs/__schema32"
+    },
+    "CancelAcknowledgement": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "$ref": "#/$defs/__schema1"
+        },
+        "taskId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "attemptId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "cancellation": {
+          "$ref": "#/$defs/__schema35"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "taskId",
+        "attemptId",
+        "cancellation"
+      ],
+      "additionalProperties": false
+    },
+    "__schema35": {
+      "type": "string",
+      "enum": [
+        "requested",
+        "cancelled",
+        "already_finished"
+      ]
+    },
+    "Health": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "$ref": "#/$defs/__schema1"
+        },
+        "engineVersion": {
+          "$ref": "#/$defs/__schema2"
+        },
+        "modes": {
+          "$ref": "#/$defs/__schema36"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "engineVersion",
+        "modes"
+      ],
+      "additionalProperties": false
+    },
+    "__schema36": {
+      "maxItems": 3,
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/__schema37"
+      }
+    },
+    "__schema37": {
+      "type": "string",
+      "enum": [
+        "structured",
+        "html",
+        "browser"
+      ]
+    }
+  }
+}
