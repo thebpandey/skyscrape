@@ -16,10 +16,9 @@ Build the smallest complete change that meets the acceptance criteria. Run focus
 
 Use qualified public sources and free services. Keep credentials, contact data, raw evidence, and private identifiers out of Git and logs. External sends, paid vendors, and public deployment are outside the approved scope. Source eligibility, authorization, and suppression apply to exports and scoped API and MCP access. Follow the release authority recorded in the plan and use the private preview and recovery evidence required by WP13.
 
-
 ## Design and release
 
-The owner approved the Permit Register layout, with the results table and evidence side by side. Three modern visual options with configurable light and dark modes have been offered. Obtain the owner's theme selection before implementing the visual treatment.
+The owner approved the Permit Register layout, with the results table and evidence side by side. The revised mockup uses a gray menu panel and yellow accents, with a white canvas in light mode and a black canvas in dark mode. Limit GUI work to static design mockups until the owner approves the revised mockup. Begin GUI implementation after that approval.
 
 Use the full Docker Compose profile for local development and verification. Run builds, lint, and tests locally. Obtain fresh, explicit authorization for each remote action, including any push to `origin/main`, hosted CI trigger, or deployment. Treat the published source-only baseline and the private runtime, credentials, and data as separate release decisions.
 
