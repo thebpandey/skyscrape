@@ -1,0 +1,26 @@
+{
+  "synthetic": true,
+  "austin": {
+    "project_id": "9007199254740993",
+    "permit_number": " 1901 000007 EP ",
+    "permittype": "EP",
+    "permit_type_desc": "Electrical Permit",
+    "status_current": " Final ",
+    "issue_date": "2024-02-29T08:00:00.000",
+    "statusdate": "2024-03-15T08:00:00.000",
+    "tcad_id": "000123",
+    "original_zip": "00501",
+    "total_job_valuation": "0.00",
+    "housing_units": "2"
+  },
+  "seattle": {
+    "permitnum": " 000123 ",
+    "permittypemapped": "Building",
+    "statuscurrent": "Permit Issued",
+    "issueddate": "2024-04-01T00:00:00.000",
+    "originalzip": "98101-0001",
+    "housingunits": "-2",
+    "housingunitsadded": "0",
+    "housingunitsremoved": "2"
+  }
+}
