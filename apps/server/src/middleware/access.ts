@@ -53,7 +53,11 @@ export function registerAccess(app: FastifyInstance, pool: DatabasePool, auth: A
       req.authenticated = await authorizeKey(pool, authorization, pepper)
       return
     }
-    const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) })
+    const { response: session, headers } = await auth.api.getSession({
+      headers: fromNodeHeaders(req.headers), returnHeaders: true,
+    })
+    const cookies = headers?.getSetCookie()
+    if (cookies?.length) reply.header('Set-Cookie', cookies)
     if (!session) fail(401, 'UNAUTHORIZED', 'Sign in required')
     const { rows: [user] } = await pool.query<{ id: string; role: Role }>(
       'SELECT id,role FROM "user" WHERE id=$1', [session.user.id],

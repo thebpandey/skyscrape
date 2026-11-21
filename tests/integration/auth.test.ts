@@ -480,6 +480,9 @@ test('refreshes a normal session through the authentication role', async () => {
   const me = await app.inject({ url: '/api/v1/me', headers: { cookie } })
   assert.equal(me.statusCode, 200)
   assert.equal(me.json().data.id, viewerId)
+  const renewedCookie = me.cookies.find(entry => entry.name === '__Secure-better-auth.session_token')
+  assert.ok(renewedCookie?.secure && renewedCookie.httpOnly)
+  assert.ok((renewedCookie.maxAge ?? 0) > 6 * 24 * 60 * 60)
   const { rows: [refreshed] } = await migrator.query(`
     SELECT "expiresAt">now()+interval '6 days' AS renewed FROM session WHERE id=$1 AND "userId"=$2
   `, [fixture.id, viewerId])
