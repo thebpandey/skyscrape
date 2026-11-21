@@ -51,7 +51,7 @@ export async function readPermits(pool: DatabasePool, principal: Principal, filt
         FROM contacts contact
         JOIN eligible_observations observation ON observation.id = contact.observation_id
         LEFT JOIN people person ON person.id = contact.person_id
-        WHERE contact.checked_on <= CURRENT_DATE AND EXISTS (
+        WHERE EXISTS (
           SELECT 1 FROM permit_participants participant
           JOIN eligible_observations participant_observation ON participant_observation.id = participant.observation_id
           WHERE participant.permit_id = permit.id AND participant.organization_id = contact.organization_id

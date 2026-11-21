@@ -73,7 +73,8 @@ CREATE TABLE source_versions (
 );
 CREATE TABLE artifacts (
  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), sha256 text NOT NULL UNIQUE CHECK (sha256 ~ '^[0-9a-f]{64}$'),
- store_key text UNIQUE NOT NULL, mime text NOT NULL, size_bytes bigint NOT NULL CHECK(size_bytes>=0), retain_until timestamptz,
+ store_key text UNIQUE NOT NULL, mime text NOT NULL, size_bytes bigint NOT NULL CHECK(size_bytes>=0),
+ retain_until timestamptz, purged_at timestamptz,
  access_class text NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE TABLE retrieval_attempts (
@@ -137,6 +138,10 @@ CREATE TABLE repair_briefs (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), incid
 CREATE TABLE exports (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), requester_id uuid NOT NULL REFERENCES "user", scope text[] NOT NULL, run_id uuid NOT NULL REFERENCES runs, filters jsonb NOT NULL, artifact_id uuid REFERENCES artifacts, expires_at timestamptz NOT NULL);
 CREATE TABLE notifications (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), recipient_id uuid NOT NULL REFERENCES "user", event_id uuid NOT NULL REFERENCES outbox, seen_at timestamptz, UNIQUE(recipient_id,event_id));
 CREATE TABLE webhook_deliveries (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), event_id uuid NOT NULL REFERENCES outbox, destination_id uuid NOT NULL, attempts integer NOT NULL DEFAULT 0, UNIQUE(event_id,destination_id));
+REVOKE INSERT, UPDATE, DELETE ON "user", account FROM skyscrape_runtime;
+REVOKE ALL ON verification, bootstrap_token FROM skyscrape_runtime;
+REVOKE UPDATE ON artifacts FROM skyscrape_runtime;
+GRANT UPDATE (retain_until, purged_at) ON artifacts TO skyscrape_runtime;
 REVOKE UPDATE, DELETE ON campaign_versions, source_versions, observations, run_observations, audit_events, settings_history FROM skyscrape_runtime;
 
 -- Disclosure requires qualification at collection time and under the current source policy.
@@ -166,7 +171,11 @@ WHERE EXISTS (
   SELECT 1 FROM permit_evidence evidence
   WHERE evidence.permit_id = permit.id AND evidence.relation = 'supports'
     AND evidence.acceptance IN ('verified', 'corroborated')
+    AND (evidence.field, evidence.value) IN (
+      ('jurisdiction', permit.jurisdiction), ('permitNumber', permit.permit_number)
+    )
+  GROUP BY evidence.permit_id
+  HAVING count(DISTINCT evidence.field) = 2
 );
 
 REVOKE INSERT, UPDATE, DELETE ON eligible_observations, permit_evidence, eligible_permits FROM skyscrape_runtime;
-REVOKE ALL ON bootstrap_token FROM skyscrape_runtime;

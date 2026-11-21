@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { randomBytes, randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { after, before, test } from 'node:test'
 import { setTimeout } from 'node:timers/promises'
 import { buildApp } from '../../apps/server/src/app.ts'
 import { createUser } from '../../apps/server/src/auth/index.ts'
 import { campaignDraft, campaignSchemaV1, errorEnvelope, recordProjection } from '../../packages/contracts/src/index.ts'
 import { migrate, openDatabase, transaction } from '../../packages/db/src/index.ts'
-import { unseal } from '../../packages/security/src/index.ts'
+import { projectContacts, unseal } from '../../packages/security/src/index.ts'
 
 const runtimeUrl = process.env.DATABASE_URL
 const migratorUrl = process.env.MIGRATOR_DATABASE_URL
@@ -31,14 +32,19 @@ const channel = 'synthetic-business@example.invalid'
 const suppressed = 'synthetic-suppressed@example.invalid'
 const nonpublic = 'synthetic-unverified@example.invalid'
 const personSuppressed = 'synthetic-optout@example.invalid'
+const futureChannel = 'synthetic-future@example.invalid'
 const privateMarker = 'synthetic-private-evidence'
 const sourceId = randomUUID()
 const sourceVersionId = randomUUID()
 const unqualifiedSourceId = randomUUID()
 const unqualifiedVersionId = randomUUID()
+const identitySourceId = randomUUID()
+const identityVersionId = randomUUID()
 const observationId = randomUUID()
 const unlinkedId = randomUUID()
 const unqualifiedId = randomUUID()
+const identityObservationId = randomUUID()
+const artifactId = randomUUID()
 const permitId = randomUUID()
 const secondPermitId = randomUUID()
 const unqualifiedPermitId = randomUUID()
@@ -81,15 +87,17 @@ async function sessionCookie(email: string, value = password) {
 async function seedPermits() {
   const orgId = randomUUID()
   const personId = randomUUID()
-  const artifactId = randomUUID()
   await transaction(pool, async client => {
-    await client.query("INSERT INTO sources(id,name) VALUES($1,'Synthetic permits'),($2,'Synthetic unqualified')", [
-      sourceId, unqualifiedSourceId,
-    ])
+    await client.query(`
+      INSERT INTO sources(id,name)
+      VALUES($1,'Synthetic permits'),($2,'Synthetic unqualified'),($3,'Synthetic identity source')
+    `, [sourceId, unqualifiedSourceId, identitySourceId])
     await client.query(`
       INSERT INTO source_versions(id,source_id,version,manifest,eligibility,method,policy_evidence)
-      VALUES($1,$2,1,'{}','qualified','structured','synthetic'),($3,$4,1,'{}','unknown','structured','synthetic')
-    `, [sourceVersionId, sourceId, unqualifiedVersionId, unqualifiedSourceId])
+      VALUES($1,$2,1,'{}','qualified','structured','synthetic'),
+        ($3,$4,1,'{}','unknown','structured','synthetic'),
+        ($5,$6,1,'{}','qualified','structured','synthetic')
+    `, [sourceVersionId, sourceId, unqualifiedVersionId, unqualifiedSourceId, identityVersionId, identitySourceId])
     await client.query(`
       INSERT INTO artifacts(id,sha256,store_key,mime,size_bytes,access_class)
       VALUES($1,$2,$3,'application/json',1,'restricted')
@@ -98,6 +106,7 @@ async function seedPermits() {
       [observationId, sourceId, sourceVersionId],
       [unlinkedId, sourceId, sourceVersionId],
       [unqualifiedId, unqualifiedSourceId, unqualifiedVersionId],
+      [identityObservationId, identitySourceId, identityVersionId],
     ]) {
       await client.query(`
         INSERT INTO observations(id,source_id,source_version_id,source_record_id,revision_hash,source_url,
@@ -130,13 +139,16 @@ async function seedPermits() {
         VALUES($1,'Synthetic County',$2,'ISSUED','issued','2026-01-01')
       `, [id, number])
       await client.query(`
-        WITH assertion AS (
+        WITH assertions AS (
           INSERT INTO field_assertions(subject_type,subject_id,field,value,acceptance,extractor_version)
-          VALUES('permit',$1,'rawStatus','ISSUED','verified','fixtures-v1') RETURNING id
+          VALUES('permit',$1,'rawStatus','ISSUED','verified','fixtures-v1'),
+            ('permit',$1,'jurisdiction','Synthetic County','verified','fixtures-v1'),
+            ('permit',$1,'permitNumber',$4,'verified','fixtures-v1')
+          RETURNING id,field
         )
         INSERT INTO evidence_links(assertion_id,observation_id,relation)
-        SELECT id,$2,'supports' FROM assertion
-      `, [id, proof])
+        SELECT id,CASE WHEN field='permitNumber' THEN $3::uuid ELSE $2::uuid END,'supports' FROM assertions
+      `, [id, proof, id === secondPermitId ? identityObservationId : proof, number])
     }
     await client.query(`
       WITH assertion AS (
@@ -158,8 +170,10 @@ async function seedPermits() {
         ($1,NULL,'email',$4,true,true,true,current_date,$3),
         ($1,NULL,'email',$5,false,false,false,NULL,$3),
         ($1,$6,'email',$7,true,true,false,current_date,$3),
-        ($1,NULL,'email',$8,true,true,false,current_date,$9)
-    `, [orgId, channel, observationId, suppressed, nonpublic, personId, personSuppressed, privateMarker, unqualifiedId])
+        ($1,NULL,'email',$8,true,true,false,current_date,$9),
+        ($1,NULL,'email',$10,true,true,false,DATE '9999-01-01',$3)
+    `, [orgId, channel, observationId, suppressed, nonpublic, personId, personSuppressed, privateMarker, unqualifiedId,
+      futureChannel])
   })
 }
 
@@ -168,7 +182,7 @@ before(async () => {
   assert.equal(runBootstrap('issue'), 0)
   assert.equal(runBootstrap('create'), 0)
   assert.equal(runBootstrap('create'), 1)
-  await transaction(pool, async client => {
+  await transaction(migrator, async client => {
     analystId = await createUser(client, analystEmail, password, 'analyst')
     viewerId = await createUser(client, viewerEmail, password, 'viewer')
   })
@@ -200,6 +214,35 @@ test('migrates an empty PostGIS DB once and keeps privileged objects private', a
   `, [observationId]), { code: '23505' })
 })
 
+test('limits identity and credential writes to the provisioning role', async () => {
+  for (const relation of ['"user"', 'account']) {
+    const { rows: [access] } = await pool.query<{ readable: boolean; writable: boolean }>(`
+      SELECT has_table_privilege(current_user,$1,'SELECT') AS readable,
+        has_table_privilege(current_user,$1,'INSERT,UPDATE,DELETE') AS writable
+    `, [relation])
+    assert.deepEqual(access, { readable: true, writable: false })
+  }
+  await assert.rejects(
+    pool.query('UPDATE "user" SET role=role WHERE id=$1', [analystId]), { code: '42501' },
+  )
+  await assert.rejects(
+    pool.query('UPDATE account SET password=password WHERE "userId"=$1', [analystId]), { code: '42501' },
+  )
+})
+
+test('preserves referenced artifact identity during retention', async () => {
+  await assert.rejects(
+    pool.query('UPDATE artifacts SET sha256=sha256, store_key=store_key WHERE id=$1', [artifactId]), { code: '42501' },
+  )
+  await assert.rejects(pool.query('DELETE FROM artifacts WHERE id=$1', [artifactId]), { code: '23503' })
+  const { rows: [retained] } = await pool.query(`
+    UPDATE artifacts SET retain_until=now(), purged_at=now()
+    WHERE id=$1 RETURNING sha256, purged_at
+  `, [artifactId])
+  assert.equal(retained.sha256, 'a'.repeat(64))
+  assert.ok(retained.purged_at instanceof Date)
+})
+
 test('validates the shared campaign contract and generates protected OpenAPI', async () => {
   const draft = {
     title: 'Synthetic campaign', template: 'permit_monitoring',
@@ -216,6 +259,36 @@ test('validates the shared campaign contract and generates protected OpenAPI', a
   assert.equal(spec.statusCode, 200)
   assert.ok(spec.json().paths['/api/v1/records/{id}'].get.responses['200'])
   assert.equal((await app.inject('/api/v1/openapi.json')).statusCode, 401)
+})
+
+test('accepts the plan campaign example and validates the documented timing variants', () => {
+  const plan = readFileSync(new URL('../../docs/requirements/02_Land_Intelligence_Implementation_Plan.md', import.meta.url), 'utf8')
+  const example = plan.match(/Campaign POST example[^\n]*:\n\n```json\n([\s\S]+?)\n```/)?.[1]
+  assert.ok(example)
+  const sample = JSON.parse(example)
+  assert.deepEqual(campaignDraft.parse(sample), sample)
+  assert.deepEqual(campaignDraft.parse({ ...sample, timing: { mode: 'recurring', frequency: 'daily', localTime: '08:00' } }), {
+    ...sample, timing: { mode: 'recurring', frequency: 'daily', localTime: '08:00', timezone: 'America/Chicago' },
+  })
+  assert.ok(campaignSchemaV1.properties?.timing)
+  const timezone = 'America/Chicago'
+  for (const timing of [
+    { mode: 'instant' },
+    { mode: 'once', timezone, scheduledFor: '2027-01-01T09:00:00-06:00' },
+    { mode: 'recurring', timezone, frequency: 'daily', localTime: '08:00' },
+    { mode: 'recurring', timezone, frequency: 'monthly', dayOfMonth: 31, localTime: '08:00' },
+    { mode: 'recurring', timezone, frequency: 'cron', cron: '0 8 * * mon-FRI' },
+  ]) {
+    assert.deepEqual(campaignDraft.parse({ ...sample, timing }), { ...sample, timing })
+  }
+  for (const timing of [
+    { ...sample.timing, timezone: '+03:00' }, { ...sample.timing, weekdays: [8] },
+    { ...sample.timing, localTime: '24:00' },
+    { mode: 'once', timezone, scheduledFor: '2027-01-01T09:00:00' },
+    { mode: 'recurring', timezone, frequency: 'cron', cron: '60 8 * * *' },
+  ]) {
+    assert.equal(campaignDraft.safeParse({ ...sample, timing }).success, false)
+  }
 })
 
 test('uses secure cookie sessions, rejects foreign origins, and audits local reset', async () => {
@@ -270,7 +343,8 @@ test('projects only eligible permit fields and analyst business channels', async
   assert.deepEqual((await app.inject({ url, headers: { cookie: viewer } })).json().data.contacts, [])
   const evidence = await app.inject({ url: `/api/v1/evidence/${observationId}`, headers: { cookie: viewer } })
   assert.equal(evidence.statusCode, 200, evidence.body)
-  assert.deepEqual(evidence.json().data.fields.find((field: { recordId: string }) => field.recordId === permitId), {
+  assert.deepEqual(evidence.json().data.fields.find((field: { recordId: string; field: string }) =>
+    field.recordId === permitId && field.field === 'rawStatus'), {
     recordId: permitId, field: 'rawStatus', acceptance: 'verified', relation: 'supports',
   })
   assert.ok(!evidence.body.includes(privateMarker) && !evidence.body.includes(channel))
@@ -290,6 +364,40 @@ test('projects only eligible permit fields and analyst business channels', async
   assert.deepEqual(new Set([page.data[0].id, next.data[0].id]), new Set([permitId, secondPermitId]))
   assert.equal(next.meta.nextCursor, undefined)
   assert.equal((await app.inject({ url: '/api/v1/records?unknown=true', headers: { cookie: viewer } })).statusCode, 400)
+})
+
+test('hides a permit whose number loses qualified support even if status remains qualified', async () => {
+  const cookie = await sessionCookie(viewerEmail)
+  const detail = () => app.inject({ url: `/api/v1/records/${secondPermitId}`, headers: { cookie } })
+  const search = () => app.inject({ url: '/api/v1/records?permitNumber=SYNTHETIC-002', headers: { cookie } })
+  assert.equal((await detail()).statusCode, 200)
+  assert.equal((await search()).json().data[0].id, secondPermitId)
+  await pool.query(`
+    INSERT INTO source_versions(source_id,version,manifest,eligibility,method,policy_evidence)
+    VALUES($1,2,'{}','blocked','structured','synthetic identity scope revoked')
+  `, [identitySourceId])
+  assert.equal((await detail()).statusCode, 404)
+  assert.deepEqual((await search()).json().data, [])
+  const evidence = await app.inject({ url: `/api/v1/evidence/${observationId}`, headers: { cookie } })
+  assert.equal(evidence.statusCode, 200)
+  assert.ok(evidence.json().data.fields.every((field: { recordId: string }) => field.recordId !== secondPermitId))
+})
+
+test('withholds channels with future check dates in the shared contact projection', () => {
+  const contact = {
+    channel: 'email' as const,
+    value: channel,
+    verified: true,
+    public_business: true,
+    suppressed: false,
+    person_suppressed: false,
+  }
+  const principal = { id: analystId, kind: 'key', role: 'analyst', scopes: ['contacts:read'] } as const
+  assert.deepEqual(projectContacts(principal, [
+    { ...contact, checked_on: '9999-01-01', value: futureChannel },
+    { ...contact, checked_on: '2000-02-31', value: futureChannel },
+    { ...contact, checked_on: '2000-01-01' },
+  ]), [{ channel: 'email', value: channel }])
 })
 
 test('audits key writes and applies scopes, live role changes, expiry and revocation', async () => {
@@ -327,7 +435,7 @@ test('audits key writes and applies scopes, live role changes, expiry and revoca
   const contactHeaders = { authorization: `Bearer ${contactKey.key}` }
   const getRecord = () => app.inject({ url: `/api/v1/records/${permitId}`, headers: contactHeaders })
   assert.equal((await getRecord()).json().data.contacts.length, 1)
-  await pool.query(`UPDATE "user" SET role='viewer' WHERE id=$1`, [analystId])
+  await migrator.query(`UPDATE "user" SET role='viewer' WHERE id=$1`, [analystId])
   assert.deepEqual((await getRecord()).json().data.contacts, [])
   await pool.query('UPDATE api_keys SET expires_at=now() WHERE id=$1', [contactKey.id])
   assert.equal((await getRecord()).statusCode, 401)

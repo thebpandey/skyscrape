@@ -9,7 +9,7 @@ import { z } from 'zod'
 import {
   envelope, envelopeSchema, evidenceProjection, idParams, loginEmail, recordProjection, recordsQuery,
 } from '../../../packages/contracts/src/index.ts'
-import { openDatabase } from '../../../packages/db/src/index.ts'
+import { credentialProvisioningLock, openDatabase, transaction } from '../../../packages/db/src/index.ts'
 import type { DatabasePool } from '../../../packages/db/src/index.ts'
 import { readEvidence, readPermits } from '../../../packages/db/src/permits.ts'
 import { roles, scopes } from '../../../packages/security/src/index.ts'
@@ -89,17 +89,18 @@ export function buildApp({
       }
       if (email !== undefined) {
         const { token } = z.object({ token: z.string() }).parse(await result.json())
-        // Wait for an in-progress reset before deciding whether this session survived it.
-        const { rowCount } = await pool.query(`
-          SELECT 1 FROM account
-          JOIN session ON session."userId"=account."userId"
-          WHERE account.id=$1 AND account.password_revision=$2 AND session.token=$3
-          FOR SHARE OF account
-        `, [passwordBefore?.id, passwordBefore?.password_revision, token])
-        if (!rowCount) {
-          await pool.query('DELETE FROM session WHERE token=$1', [token])
-          fail(401, 'UNAUTHORIZED', 'Sign-in or sign-out failed')
-        }
+        const sessionIsCurrent = await transaction(pool, async client => {
+          // Read the password revision after any in-progress reset commits.
+          await client.query('SELECT pg_advisory_xact_lock_shared($1)', [credentialProvisioningLock])
+          const { rowCount } = await client.query(`
+            SELECT 1 FROM account
+            JOIN session ON session."userId"=account."userId"
+            WHERE account.id=$1 AND account.password_revision=$2 AND session.token=$3
+          `, [passwordBefore?.id, passwordBefore?.password_revision, token])
+          if (!rowCount) await client.query('DELETE FROM session WHERE token=$1', [token])
+          return Boolean(rowCount)
+        })
+        if (!sessionIsCurrent) fail(401, 'UNAUTHORIZED', 'Sign-in or sign-out failed')
       }
       const cookies = result.headers.getSetCookie()
       if (cookies.length) reply.header('Set-Cookie', cookies)

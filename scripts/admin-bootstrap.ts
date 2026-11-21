@@ -1,6 +1,6 @@
 import { timingSafeEqual } from 'node:crypto'
 import { loginEmail } from '../packages/contracts/src/index.ts'
-import { openDatabase, transaction } from '../packages/db/src/index.ts'
+import { credentialProvisioningLock, openDatabase, transaction } from '../packages/db/src/index.ts'
 import type { DatabasePool } from '../packages/db/src/index.ts'
 import { createUser, hashPassword } from '../apps/server/src/auth/index.ts'
 import { tokenDigest } from '../packages/security/src/index.ts'
@@ -16,7 +16,7 @@ export async function bootstrap(pool: DatabasePool, mode: string, env: NodeJS.Pr
   const digest = tokenDigest(token, pepper)
 
   await transaction(pool, async client => {
-    await client.query('SELECT pg_advisory_xact_lock(4305021)')
+    await client.query('SELECT pg_advisory_xact_lock($1)', [credentialProvisioningLock])
     if (mode === 'issue') {
       await client.query(`
         INSERT INTO bootstrap_token(singleton,digest,expires_at) VALUES(true,$1,now()+interval '10 minutes')

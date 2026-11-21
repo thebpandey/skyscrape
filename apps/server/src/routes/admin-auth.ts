@@ -42,7 +42,7 @@ export function registerAdminAuth(
     const key = `sky_${prefix}_${randomBytes(32).toString('base64url')}`
     const id = await transaction(pool, async client => {
       const { rows: [owner] } = await client.query<{ role: Role }>(
-        'SELECT role FROM "user" WHERE id=$1 FOR SHARE', [ownerId],
+        'SELECT role FROM "user" WHERE id=$1', [ownerId],
       )
       if (!owner) fail(404, 'NOT_FOUND', 'User not found')
       if (requestedScopes.some(scope => !roleScopes(owner.role).includes(scope))) {

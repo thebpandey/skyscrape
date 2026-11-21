@@ -53,10 +53,17 @@ type Contact = {
   checked_on: string | null
 }
 
+function hasCurrentCheckDate(checkedOn: string | null, today: string) {
+  if (checkedOn === null || checkedOn > today) return false
+  const timestamp = Date.parse(checkedOn)
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === checkedOn
+}
+
 export function projectContacts(principal: Principal, contacts: readonly Contact[]) {
   if (!can(principal, 'contacts:read')) return []
+  const today = new Date().toISOString().slice(0, 10)
   return contacts
-    .filter(contact => contact.verified && contact.public_business && contact.checked_on !== null
+    .filter(contact => contact.verified && contact.public_business && hasCurrentCheckDate(contact.checked_on, today)
       && !contact.suppressed && !contact.person_suppressed)
     .map(({ channel, value }) => ({ channel, value }))
 }

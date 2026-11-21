@@ -4,6 +4,7 @@ import { drizzle } from 'drizzle-orm/node-postgres'
 import { migrate as applyMigrations } from 'drizzle-orm/node-postgres/migrator'
 
 export type DatabasePool = pg.Pool
+export const credentialProvisioningLock = 4305021
 export function openDatabase(url: string) {
   return new pg.Pool({ connectionString: url })
 }
