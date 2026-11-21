@@ -111,6 +111,11 @@ function permitText(raw: PublisherValue): string | null {
   return typeof raw === "string" ? raw.trim() || null : null;
 }
 
+function postalCode(raw: PublisherValue): string | null {
+  const text = permitText(raw);
+  return text !== null && /^\d{5}(?:-\d{4})?$/.test(text) ? text : null;
+}
+
 function digits(raw: PublisherValue): string | null {
   const text = typeof raw === "number" && Number.isSafeInteger(raw) ? String(raw) : permitText(raw);
   return text !== null && /^-?\d+$/.test(text) ? text : null;
@@ -149,7 +154,7 @@ const austinFields = [
   ["expiresAt", "expiresdate", calendarDate],
   ["statusAt", "statusdate", calendarDate],
   ["siteAddress", "original_address1", permitText],
-  ["postalCode", "original_zip", digits],
+  ["postalCode", "original_zip", (raw) => postalCode(typeof raw === "number" ? String(raw) : raw)],
   ["localAppraisalId", "tcad_id", permitText],
   ["reportedPermitValuationUsd", "total_job_valuation", decimal],
   ["reportedPermitHousingUnits", "housing_units", integer],
@@ -165,7 +170,7 @@ const seattleFields = [
   ["expiresAt", "expiresdate", calendarDate],
   ["completedAt", "completeddate", calendarDate],
   ["siteAddress", "originaladdress1", permitText],
-  ["postalCode", "originalzip", permitText],
+  ["postalCode", "originalzip", postalCode],
   ["estimatedProjectCostUsd", "estprojectcost", decimal],
   ["reportedNetHousingUnits", "housingunits", integer],
   ["reportedHousingUnitsAdded", "housingunitsadded", integer],
@@ -236,10 +241,12 @@ function normalizeRow(dataset: Dataset, row: unknown, evidence: MunicipalPermitE
   const rawIssuedAt = publisherValue(row, dataset.issuedAt);
   const eventDate = calendarDate(rawIssuedAt);
   if (typeof sourceRecordKey !== "string" || permitNumber === null
+    || /^(?:n\/?a|n\.a\.|not available|not applicable|unknown|none|null|-+)$/i.test(permitNumber)
     || (dataset.requireIssuedDate && eventDate === null)) return null;
 
   const { fetchedAt, evidenceRef, evidenceDigest } = evidence;
   if (!/^\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]\d{2}:\d{2})$/.test(fetchedAt)
+    || calendarDate(fetchedAt.slice(0, 10)) === null
     || !Number.isFinite(Date.parse(fetchedAt)) || !evidenceRef.trim() || !/^[0-9a-f]{64}$/i.test(evidenceDigest)) {
     throw new TypeError("Invalid municipal permit evidence context");
   }

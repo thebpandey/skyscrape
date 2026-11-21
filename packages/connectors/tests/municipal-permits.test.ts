@@ -144,3 +144,38 @@ test("rejects rows without usable identity or issuance and requires evidence for
   assert.equal(normalizeSeattlePermit({ ...fixture.seattle, issueddate: "2024-02-30T00:00:00.000" }, evidence), null);
   assert.throws(() => normalizeSeattlePermit(fixture.seattle, { ...evidence, evidenceDigest: "" }), TypeError);
 });
+
+test("rejects missing permit number markers before assigning natural IDs", () => {
+  assert.equal(normalizeAustinPermit({ ...fixture.austin, permit_number: " N/A " }, evidence), null);
+  assert.equal(normalizeSeattlePermit({ ...fixture.seattle, permitnum: "unknown" }, evidence), null);
+});
+
+test("retains unusable postal codes as raw evidence with unknown acceptance", () => {
+  const austin = normalizeAustinPermit({ ...fixture.austin, original_zip: 787 }, evidence);
+  const seattle = normalizeSeattlePermit({ ...fixture.seattle, originalzip: "unknown" }, evidence);
+  assert.ok(austin);
+  assert.ok(seattle);
+  for (const [permit, sourceField, rawValue] of [
+    [austin, "original_zip", 787],
+    [seattle, "originalzip", "unknown"],
+  ] as const) {
+    const postalCode = assertion(permit, "postalCode");
+    assert.equal(postalCode.acceptance, "unknown");
+    assert.equal(postalCode.value, null);
+    assert.equal(postalCode.sourceField, sourceField);
+    assert.equal(postalCode.rawValue, rawValue);
+    assert.equal(postalCode.evidenceDigest, evidence.evidenceDigest);
+  }
+});
+
+test("rejects an impossible fetch date and preserves valid offset timestamps", () => {
+  assert.throws(
+    () => normalizeSeattlePermit(fixture.seattle, { ...evidence, fetchedAt: "2024-02-30T12:00:00Z" }),
+    TypeError,
+  );
+  const fetchedAt = "2024-02-29T23:30:00-08:00";
+  const permit = normalizeSeattlePermit(fixture.seattle, { ...evidence, fetchedAt });
+  assert.ok(permit);
+  assert.equal(permit.fetchedAt, fetchedAt);
+  assert.equal(assertion(permit, "permitNumber").fetchedAt, fetchedAt);
+});
