@@ -5,7 +5,7 @@ import chatgptLogo from '../assets/chatgpt-logo-white.svg?url'
 import { ApiError, request } from '../lib/api'
 import { Loading, Problem } from '../components/states'
 
-type Status = { retryNew: boolean; accounts: { id: string; label: string; needsConsent: boolean; connected: boolean }[]; active?: string; connected: boolean;
+type Status = { sshUser: string; callbackPort: number; retryNew: boolean; accounts: { id: string; label: string; needsConsent: boolean; connected: boolean }[]; active?: string; connected: boolean;
   models: { id: string; name: string; efforts: string[] }[]; model?: string; effort?: string; problem?: string }
 const base = '/api/v1/settings/chatgpt'
 const recovery: Record<string, string> = {
@@ -29,6 +29,7 @@ export function ChatGPTSettings() {
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const [welcome, setWelcome] = useState(false)
+  const [remoteSetup, setRemoteSetup] = useState<{ id?: string; retryNew?: true }>()
   const returning = useRef(false)
   async function run(action: () => Promise<string>) {
     setBusy(true); setMessage('')
@@ -55,6 +56,10 @@ export function ChatGPTSettings() {
     })
   }, []) // The callback may be consumed once by its initiating workspace session.
   function connect(id?: string, retryNew?: true) {
+    if (['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)) start(id, retryNew)
+    else setRemoteSetup({ id, retryNew })
+  }
+  function start(id?: string, retryNew?: true) {
     void run(async () => {
       const { url } = await (await post('connect', { id, retryNew })).json() as { url: string }
       const target = new URL(url)
@@ -70,6 +75,8 @@ export function ChatGPTSettings() {
     })
   }
   const data = result.data
+  const hostname = window.location.hostname
+  const sshHost = /^(?:[a-z0-9][a-z0-9.-]*|\[[a-f0-9:]+\])$/i.test(hostname) ? hostname : 'YOUR_SSH_HOST'
   return <div className="page"><h1>Settings</h1>
     <section aria-labelledby="chatgpt-title" className="state-card">
       <h2 id="chatgpt-title">Connect ChatGPT</h2>
@@ -94,6 +101,20 @@ export function ChatGPTSettings() {
           <button type="button" disabled={busy} className="button" onClick={() => disconnect(data.active!)}>Disconnect ChatGPT</button>
         </>}
       </>}
+      {data && <Dialog.Root open={Boolean(remoteSetup)} onOpenChange={open => { if (!open) setRemoteSetup(undefined) }}>
+        <Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="dialog-sheet command-sheet">
+          <Dialog.Title>Connect from this computer</Dialog.Title>
+          <Dialog.Description>ChatGPT returns to this computer. Open Windows Terminal or a terminal on this computer and run the command to forward that connection to SkyScrape.</Dialog.Description>
+          <p><code style={{ overflowWrap: 'anywhere', userSelect: 'all' }}>ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:{data.callbackPort}:127.0.0.1:{data.callbackPort} {data.sshUser}@{sshHost}</code></p>
+          <p>Use your SSH login if it differs. After signing in, leave the terminal open until you return to Settings. A quiet terminal is expected.</p>
+          <details><summary>Port already in use?</summary><p>If the same tunnel is already open, use it. Otherwise finish the sign-in or close the program using port {data.callbackPort}, then run the command again.</p></details>
+          <button type="button" className="button primary" onClick={() => {
+            if (remoteSetup) start(remoteSetup.id, remoteSetup.retryNew)
+            setRemoteSetup(undefined)
+          }}>Tunnel ready, continue</button>
+          <Dialog.Close className="button">Cancel</Dialog.Close>
+        </Dialog.Content></Dialog.Portal>
+      </Dialog.Root>}
       <Dialog.Root open={welcome} onOpenChange={setWelcome}><Dialog.Portal>
         <Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="dialog-sheet command-sheet">
           <Dialog.Title>You’re using your ChatGPT plan</Dialog.Title>

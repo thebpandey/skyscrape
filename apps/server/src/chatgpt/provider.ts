@@ -60,6 +60,8 @@ export class ChatGPT {
   }
   close() {
     this.pending?.server.close()
+    // A browser can preconnect before a retry reuses this port. Retire those sockets too.
+    this.pending?.server.closeAllConnections()
     this.pending = undefined
   }
   private async request(url: string, init: RequestInit = {}) {
@@ -236,7 +238,7 @@ export class ChatGPT {
       }
       const retry = this.retryRegistration
       const retryNew = Boolean(retry && retry.session === session && retry.expires > Date.now())
-      return { retryNew, accounts: host.accounts.map(({ id, label, tokens, identityOnly }) => ({ id, label, connected: Boolean(tokens), needsConsent: Boolean(identityOnly) })), active: a?.id,
+      return { callbackPort: this.port, retryNew, accounts: host.accounts.map(({ id, label, tokens, identityOnly }) => ({ id, label, connected: Boolean(tokens), needsConsent: Boolean(identityOnly) })), active: a?.id,
         connected: Boolean(a?.tokens), model: a?.model, effort: a?.effort, models, problem }
     })
   }

@@ -1,3 +1,4 @@
+import { userInfo } from 'node:os'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import type { ZodTypeProvider } from '@fastify/type-provider-zod'
 import { z } from 'zod'
@@ -17,7 +18,9 @@ export function registerChatGPT(app: FastifyInstance, owner: string | undefined,
   const schema = { hide: true } as const
   routes.get(base, { schema }, async req => {
     const { provider, session } = access(req)
-    return provider.status(session)
+    const status = await provider.status(session)
+    const login = process.env.CHATGPT_SSH_USER ?? userInfo().username
+    return { ...status, sshUser: /^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$/.test(login) ? login : 'YOUR_SSH_USER' }
   })
   routes.post(base + '/connect', { schema: { ...schema, body: z.strictObject({ id: z.uuid().optional(), retryNew: z.literal(true).optional() }) } }, req => {
     const { provider, session } = access(req)

@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { tmpdir, userInfo } from 'node:os'
 import { resolve, join } from 'node:path'
 import test from 'node:test'
+import { createServer as createSocketServer } from 'node:net'
+import { once } from 'node:events'
 import { exportJWK, generateKeyPair, SignJWT } from 'jose'
 import Fastify from 'fastify'
 import { validatorCompiler } from '@fastify/type-provider-zod'
@@ -105,7 +107,12 @@ test('synthetic issuer, owner session, browser preferences, renewable grant and 
   await frontend.listen()
   t.after(() => frontend.close())
   const origin = 'http://127.0.0.1:' + frontend.httpServer.address().port
-  const provider = new ChatGPT(store, origin, 0, fetcher, origin + '/synthetic-authorize')
+  const probe = createSocketServer().listen(0, '127.0.0.1')
+  await once(probe, 'listening')
+  const callbackPort = probe.address().port
+  probe.close()
+  await once(probe, 'close')
+  const provider = new ChatGPT(store, origin, callbackPort, fetcher, origin + '/synthetic-authorize')
   t.after(() => provider.close())
   registerChatGPT(api, owner, provider)
   const apiOrigin = await api.listen({ host: '127.0.0.1', port: 0 })
@@ -127,6 +134,39 @@ test('synthetic issuer, owner session, browser preferences, renewable grant and 
     }
     await route.fulfill({ response })
   })
+  // Simulate a browser on another computer: its loopback cannot reach the API host.
+  const remoteOrigin = 'https://miniserver.test:10444'
+  const remotePage = await context.newPage()
+  let starts = 0
+  let loopbackVisits = 0
+  await remotePage.route(remoteOrigin + '/**', async route => {
+    const path = new URL(route.request().url()).pathname
+    if (path === base + '/connect') starts++
+    const target = path.startsWith('/api/') ? apiOrigin : origin
+    await route.fulfill({ response: await route.fetch({
+      url: route.request().url().replace(remoteOrigin, target),
+    }) })
+  })
+  await remotePage.route('http://127.0.0.1:*/auth/start?*', route => {
+    loopbackVisits++
+    return route.fulfill({ status: 200, body: 'Synthetic client loopback' })
+  })
+  await remotePage.goto(remoteOrigin + '/settings')
+  const connectButton = remotePage.getByRole('button', { name: 'Continue with ChatGPT' })
+  await connectButton.click()
+  const tunnel = remotePage.getByRole('dialog', { name: 'Connect from this computer' })
+  await expect(tunnel.locator('code')).toHaveText(
+    `ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:${callbackPort}:127.0.0.1:${callbackPort} `
+    + (process.env.CHATGPT_SSH_USER ?? userInfo().username) + '@miniserver.test')
+  await tunnel.getByRole('button', { name: 'Cancel' }).click()
+  assert.equal(starts, 0)
+  assert.equal(loopbackVisits, 0)
+  await connectButton.click()
+  await tunnel.getByRole('button', { name: 'Tunnel ready, continue' }).click()
+  await expect(remotePage.getByText('Synthetic client loopback')).toBeVisible()
+  assert.equal(starts, 1)
+  assert.equal(loopbackVisits, 1)
+  await remotePage.close()
   let savedHost
   frontend.middlewares.stack.unshift({ route: '/synthetic-authorize', handle: async (req, res) => {
     auth = new URL(req.url, origin).searchParams
