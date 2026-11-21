@@ -1,0 +1,30 @@
+{
+  "protocolVersion": 1,
+  "taskId": "task_parcel_13",
+  "attemptId": "attempt_1",
+  "classification": "failed",
+  "finalUrl": "https://records.example.org/parcels",
+  "redirects": [],
+  "retrievedAt": "2026-12-01T18:00:01Z",
+  "engineVersion": "fixture-1",
+  "httpStatus": 200,
+  "responseMediaType": "text/html",
+  "contentClassification": "challenge",
+  "counters": { "requests": 1, "bytes": 200, "browserSeconds": 1, "quotaUnits": 1, "costMicros": 0 },
+  "evidence": [{
+    "artifactId": "artifact_challenge_1",
+    "sha256": "e764d3553a1133cb04a27b6d95e88f4e2bb6ce62e57fc0c52a1cb937d0150ead",
+    "bytes": 512,
+    "mediaType": "image/png"
+  }],
+  "observations": [],
+  "error": {
+    "code": "CHALLENGE_REQUIRED",
+    "message": "The source returned a challenge page",
+    "retryable": false,
+    "correlationId": "corr_24",
+    "action": "Retrieve the parcel table",
+    "outcome": "Challenge page received",
+    "nextAction": "Review permitted session options"
+  }
+}
