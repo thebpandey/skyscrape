@@ -142,7 +142,7 @@ test('synthetic issuer, owner session, browser preferences, renewable grant and 
   const remotePage = await context.newPage()
   let starts = 0
   let loopbackVisits = 0
-  await remotePage.route(url => sshHosts.has(url.origin), async route => {
+  await context.route(url => sshHosts.has(url.origin), async route => {
     const { origin: remoteOrigin, pathname: path } = new URL(route.request().url())
     if (path === base + '/connect') starts++
     const target = path.startsWith('/api/') ? apiOrigin : origin
@@ -190,9 +190,13 @@ test('synthetic issuer, owner session, browser preferences, renewable grant and 
     assert.equal((await fetch(tampered, { redirect: 'manual' })).status, 400)
     res.writeHead(302, { location: callback.href }).end()
   } })
-  await page.goto(origin + '/settings')
+  // This browser is on the miniserver and opens Settings by its Tailscale hostname.
+  await page.goto('https://miniserver.test:10444/settings')
   await page.getByRole('button', { name: 'Continue with ChatGPT' }).click()
+  assert.equal(starts, 1)
+  await page.getByRole('button', { name: 'I’m using a browser on the miniserver' }).click()
   await expect(page.getByText('Account saved. ChatGPT plan use is disabled.')).toBeVisible()
+  assert.equal(starts, 2)
   await page.reload()
   await expect(page.getByText('ChatGPT plan use disabled')).toBeVisible()
   assert.equal(modelCalls, 0)

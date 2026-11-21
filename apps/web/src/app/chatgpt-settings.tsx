@@ -59,6 +59,10 @@ export function ChatGPTSettings() {
     if (['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)) start(id, retryNew)
     else setRemoteSetup({ id, retryNew })
   }
+  function confirmLocation() {
+    if (remoteSetup) start(remoteSetup.id, remoteSetup.retryNew)
+    setRemoteSetup(undefined)
+  }
   function start(id?: string, retryNew?: true) {
     void run(async () => {
       const { url } = await (await post('connect', { id, retryNew })).json() as { url: string }
@@ -104,14 +108,12 @@ export function ChatGPTSettings() {
       {data && <Dialog.Root open={Boolean(remoteSetup)} onOpenChange={open => { if (!open) setRemoteSetup(undefined) }}>
         <Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="dialog-sheet command-sheet">
           <Dialog.Title>Connect from this computer</Dialog.Title>
-          <Dialog.Description>ChatGPT returns to this computer. Open Windows Terminal or a terminal on this computer and run the command to forward that connection to SkyScrape.</Dialog.Description>
+          <Dialog.Description>ChatGPT returns to the computer running your browser. If you’re browsing on the miniserver, choose the miniserver option below. On another computer, run this command in Windows Terminal or your terminal.</Dialog.Description>
           <p><code style={{ overflowWrap: 'anywhere', userSelect: 'all' }}>ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:{data.callbackPort}:127.0.0.1:{data.callbackPort} {data.sshUser}@{sshHost}</code></p>
           <p>Use your SSH login if it differs. After signing in, leave the terminal open until you return to Settings. A quiet terminal is expected.</p>
           <details><summary>Port already in use?</summary><p>If the same tunnel is already open, use it. Otherwise finish the sign-in or close the program using port {data.callbackPort}, then run the command again.</p></details>
-          <button type="button" className="button primary" onClick={() => {
-            if (remoteSetup) start(remoteSetup.id, remoteSetup.retryNew)
-            setRemoteSetup(undefined)
-          }}>Tunnel ready, continue</button>
+          <button type="button" className="button primary" onClick={confirmLocation}>Tunnel ready, continue</button>
+          <button type="button" className="button" onClick={confirmLocation}>I’m using a browser on the miniserver</button>
           <Dialog.Close className="button">Cancel</Dialog.Close>
         </Dialog.Content></Dialog.Portal>
       </Dialog.Root>}

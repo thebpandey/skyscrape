@@ -21,7 +21,7 @@ On the miniserver, go directly to step 2. On a different computer, use an SSH ac
    ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:1455:127.0.0.1:1455 USER@MINISERVER
    ```
 
-2. Open the existing private SkyScrape URL on that computer. From a local browser select **Settings → Continue with ChatGPT**. From the remote browser select **Tunnel ready, continue**. This starts a fresh sign-in. Choose a workspace and review the permission to use your ChatGPT plan. The provider returns to the browser computer’s loopback address. The tunnel forwards that callback to the initiating API process. SkyScrape returns you to the original private workspace.
+2. Open the existing private SkyScrape URL on that computer. On the miniserver select **Settings → Continue with ChatGPT**. If you opened its Tailscale URL, choose **I’m using a browser on the miniserver** to connect directly. From the remote browser select **Tunnel ready, continue**. This starts a fresh sign-in. Choose a workspace and review the permission to use your ChatGPT plan. The provider returns to the browser computer’s loopback address. On the miniserver the callback reaches the API directly. On another computer the tunnel forwards it to the API. SkyScrape returns you to the original private workspace.
 3. Choose an available model and reasoning effort, then select **Save preferences**. If the account catalog omits reasoning options, **Model default** lets the provider choose. Refresh Settings to check the saved selection.
 4. To use another registration, choose **Add ChatGPT account** or connect a saved account. **Disconnect ChatGPT** attempts to revoke the selected renewable grant and clears its local tokens. If SkyScrape reports an unconfirmed revocation, disconnect the app in ChatGPT Settings.
 
