@@ -22,13 +22,22 @@ function usageError(code: unknown) {
   if (code === 'subscription_sharing_usage_unavailable')
     fail(503, 'CHATGPT_USAGE_UNAVAILABLE', 'ChatGPT could not check usage. Try again later.')
 }
+async function rejectedBearer(res: Response) {
+  if (res.status !== 401 && res.status !== 403) return false
+  const challenges = (res.headers.get('www-authenticate') ?? '').split(/,\s*(?=[\w-]+\s+[\w-]+=)/)
+  if (challenges.some(value => /^Bearer\s/i.test(value) && /(?:\s|,)error\s*=\s*"?invalid_token"?(?=\s*(?:,|$))/i.test(value)))
+    return true
+  const body = await res.json().catch(() => null) as { error?: string | { code?: string }; code?: string } | null
+  return body?.error === 'invalid_token' || body?.code === 'invalid_token'
+    || (typeof body?.error === 'object' && body.error?.code === 'invalid_token')
+}
 const slug = z.string().min(1).max(160)
 const tokenSchema = z.object({ access_token: z.string().min(1), refresh_token: z.string().min(1),
   token_type: z.string().regex(/^Bearer$/i), expires_in: z.number().int().positive(), scope: z.string().optional(),
   id_token: z.string().min(1).optional() })
 const catalogSchema = z.object({ models: z.array(z.object({ slug, visibility: z.string(), display_name: z.string(),
   supported_reasoning_levels: z.array(z.object({ effort: slug })).nullish() })) })
-type Pending = { revision: number; state: string; nonce: string; verifier: string; client?: string; session: string;
+type Pending = { accountId?: string; revision: number; state: string; nonce: string; verifier: string; client?: string; session: string;
   expires: number; callback: string; server: Server; code?: string; issued?: string; denied?: boolean }
 
 export class ChatGPT {
@@ -60,7 +69,7 @@ export class ChatGPT {
   private token(form: URLSearchParams) {
     return this.request(issuer + '/api/accounts/oauth/token', { method: 'POST', body: form })
   }
-  async start(session: string, id?: string) {
+  async start(session: string, id?: string, retryNew = false) {
     if (this.starting || (this.pending && this.pending.expires > Date.now() && this.pending.session !== session))
       fail(409, 'CHATGPT_BUSY', 'Another sign-in is in progress.')
     this.starting = true
@@ -69,7 +78,8 @@ export class ChatGPT {
       const account = id ? host.accounts.find(a => a.id === id) : undefined
       if (id && !account) invalid()
       const retry = this.retryRegistration
-      const client = account?.client ?? (!id && retry?.session === session && retry.expires > Date.now() ? retry.client : undefined)
+      if (retryNew && (id || !retry || retry.session !== session || retry.expires <= Date.now())) return invalid()
+      const client = retryNew ? retry?.client : account?.client
       const state = random(), nonce = random(), verifier = random()
       const auth = new URL(this.authorizeUrl)
       const ticket = random()
@@ -102,7 +112,8 @@ export class ChatGPT {
       const address = server.address()
       if (!address || typeof address === 'string') { server.close(); return unavailable() }
       const callback = 'http://127.0.0.1:' + address.port + '/auth/callback'
-      this.pending = { server, session, state, revision: host.revision ?? 0, nonce, verifier, callback, client, expires: Date.now() + 600000 }
+      this.retryRegistration = undefined
+      this.pending = { server, session, state, accountId: account?.id, revision: host.revision ?? 0, nonce, verifier, callback, client, expires: Date.now() + 600000 }
       const timer = setTimeout(() => { if (this.pending?.state === state) this.close() }, 600000)
       timer.unref()
       auth.search = new URLSearchParams({
@@ -126,7 +137,10 @@ export class ChatGPT {
       code: p.code, code_verifier: p.verifier, redirect_uri: p.callback, resource }))
     if (!res.ok) {
       const problem = await res.json().catch(() => ({})) as { error?: string }
-      if (problem.error === 'invalid_grant') this.retryRegistration = { session, client, expires: p.expires }
+      if (!p.accountId && problem.error === 'invalid_grant') {
+        this.retryRegistration = { session, client, expires: p.expires }
+        fail(409, 'CHATGPT_REGISTRATION_RETRY', 'Retry this new ChatGPT registration.')
+      }
       return invalid()
     }
     const exchange = await res.json()
@@ -146,7 +160,7 @@ export class ChatGPT {
       if ((host.revision ?? 0) !== p.revision) return invalid()
       const firstConnection = Boolean(data) && !(host.welcomed ?? host.accounts.some(a => a.tokens))
       let account = host.accounts.find(a => a.client === client)
-      if ((p.client && !account && this.retryRegistration?.client !== client) || (account && account.subject !== subject)) return invalid()
+      if (account?.id !== p.accountId || (account && account.subject !== subject)) return invalid()
       this.retryRegistration = undefined
       if (!account) {
         account = { id: randomUUID(), client, subject, label: 'Account ' + (host.accounts.length + 1) }
@@ -191,14 +205,26 @@ export class ChatGPT {
     return a.tokens.access
   }
   private async models(a: Registration, save: () => Promise<void>) {
-    const res = await this.request(resource + '/models', { headers: { Authorization: 'Bearer ' + await this.access(a, save) } })
-    if (res.status === 403 || res.status === 401) return reconnect()
+    const catalog = async () => this.request(resource + '/models', {
+      headers: { Authorization: 'Bearer ' + await this.access(a, save) },
+    })
+    let res = await catalog()
+    if (await rejectedBearer(res) && a.tokens) {
+      a.tokens.expires = 0
+      await save()
+      res = await catalog()
+      if (await rejectedBearer(res)) {
+        delete a.tokens
+        await save()
+        return reconnect()
+      }
+    }
     if (!res.ok) return unavailable()
     return catalogSchema.parse(await res.json()).models.filter(m => m.visibility === 'list').map(m => ({
       id: m.slug, name: m.display_name, efforts: m.supported_reasoning_levels?.map(e => e.effort) ?? [],
     }))
   }
-  async status() {
+  async status(session?: string) {
     return this.store(async (host, save) => {
       const a = host.accounts.find(a => a.id === host.active)
       let models: Awaited<ReturnType<ChatGPT['models']>> = []
@@ -208,7 +234,9 @@ export class ChatGPT {
           problem = a.tokens ? 'Model list unavailable. Retry or reconnect your account.' : 'Reconnect your saved ChatGPT account.'
         }
       }
-      return { accounts: host.accounts.map(({ id, label, tokens, identityOnly }) => ({ id, label, connected: Boolean(tokens), needsConsent: Boolean(identityOnly) })), active: a?.id,
+      const retry = this.retryRegistration
+      const retryNew = Boolean(retry && retry.session === session && retry.expires > Date.now())
+      return { retryNew, accounts: host.accounts.map(({ id, label, tokens, identityOnly }) => ({ id, label, connected: Boolean(tokens), needsConsent: Boolean(identityOnly) })), active: a?.id,
         connected: Boolean(a?.tokens), model: a?.model, effort: a?.effort, models, problem }
     })
   }

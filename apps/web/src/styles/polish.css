@@ -36,10 +36,10 @@ html:root[data-theme="dark"] {
 .metadata dd, .permit-table td { font-variant-numeric: tabular-nums; }
 .source-section .metadata > div:last-child { border-bottom: 0; }
 .workspace .register-sections { margin-top: 8px; }
-.workspace .button:not(.primary):not([data-oai-siwc-button]):active { background: var(--selection); }
+.workspace .button:not(.primary):not(.rail-button):not([data-oai-siwc-button]):active { background: var(--selection); }
 .workspace input:hover, .workspace select:hover, .login-form input:hover { border-color: var(--muted); }
 .workspace .campaign-form fieldset, .workspace .campaign-preview { padding: 18px; background: var(--paper); }
-.campaign-page > section[aria-label="Saved campaigns"] { padding: 16px 20px; background: var(--wash); border: 1px solid var(--divider); border-radius: 6px; }
+.campaign-page > section[aria-label="Saved campaigns"] { min-width: 0; overflow-wrap: anywhere; padding: 16px 20px; background: var(--wash); border: 1px solid var(--divider); border-radius: 6px; }
 .campaign-page > section[aria-label="Saved campaigns"] h2 { margin-bottom: 6px; font-size: 17px; }
 .campaign-page > section[aria-label="Saved campaigns"] p { color: var(--muted); }
 .campaign-page > section[aria-label="Saved campaigns"] a { text-decoration: underline; text-underline-offset: 3px; }

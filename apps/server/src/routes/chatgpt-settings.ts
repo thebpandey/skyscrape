@@ -15,10 +15,13 @@ export function registerChatGPT(app: FastifyInstance, owner: string | undefined,
     return { provider, session: proof.id }
   }
   const schema = { hide: true } as const
-  routes.get(base, { schema }, async req => access(req).provider.status())
-  routes.post(base + '/connect', { schema: { ...schema, body: z.strictObject({ id: z.uuid().optional() }) } }, req => {
+  routes.get(base, { schema }, async req => {
     const { provider, session } = access(req)
-    return provider.start(session, req.body.id)
+    return provider.status(session)
+  })
+  routes.post(base + '/connect', { schema: { ...schema, body: z.strictObject({ id: z.uuid().optional(), retryNew: z.literal(true).optional() }) } }, req => {
+    const { provider, session } = access(req)
+    return provider.start(session, req.body.id, req.body.retryNew)
   })
   routes.post(base + '/finish', { schema }, async req => {
     const { provider, session } = access(req)

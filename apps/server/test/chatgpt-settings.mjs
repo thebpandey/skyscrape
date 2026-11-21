@@ -33,7 +33,8 @@ test('synthetic issuer, owner session, browser preferences, renewable grant and 
   const jwk = { ...await exportJWK(keys.publicKey), kid: 'synthetic', alg: 'RS256' }
   let auth, issuedTokens = 0, refreshed = 0, revoked = 0, inference = 0, failInference = false
   let identity = 'synthetic-owner', direct = false, expectedConsent = false, modelCalls = 0
-  let usageFailure, refreshFailure
+  let usageFailure, refreshFailure, exchangeFails = false
+  let expectedClient = 'dynamic_agent_client', callbackClient = 'issued-synthetic', efforts = [{ effort: 'medium' }]
   const granted = 'openid profile email resource.invoke offline_access chatgpt.tokens.use.direct'
   const fetcher = async (input, init) => {
     const url = String(input)
@@ -43,7 +44,7 @@ test('synthetic issuer, owner session, browser preferences, renewable grant and 
     if (url === 'https://auth.openai.com/.well-known/jwks.json') return Response.json({ keys: [jwk] })
     if (url === 'https://auth.openai.com/api/accounts/oauth/token') {
       const form = init.body
-      assert.equal(form.get('client_id'), 'issued-synthetic')
+      assert.equal(form.get('client_id'), callbackClient)
       assert.equal(form.get('resource'), 'https://api.openai.com/v1')
       if (form.get('grant_type') === 'refresh_token') {
         refreshed++
@@ -53,10 +54,11 @@ test('synthetic issuer, owner session, browser preferences, renewable grant and 
         return Response.json({ access_token: 'rotated-access', refresh_token: 'rotated-refresh', expires_in: 3600, token_type: 'Bearer' })
       }
       issuedTokens++
+      if (exchangeFails) return Response.json({ error: 'invalid_grant' }, { status: 400 })
       assert.equal(form.get('redirect_uri'), auth.get('redirect_uri'))
       assert.equal(createHash('sha256').update(form.get('code_verifier')).digest('base64url'), auth.get('code_challenge'))
       const idToken = await new SignJWT({ nonce: auth.get('nonce') }).setProtectedHeader({ alg: 'RS256', kid: jwk.kid })
-        .setSubject(identity).setAudience('issued-synthetic').setIssuer('https://auth.openai.com').setExpirationTime('5m').sign(keys.privateKey)
+        .setSubject(identity).setAudience(callbackClient).setIssuer('https://auth.openai.com').setExpirationTime('5m').sign(keys.privateKey)
       if (!direct) return Response.json({ id_token: idToken, scope: 'openid profile email' })
       return Response.json({ id_token: idToken, access_token: 'private-access', refresh_token: 'private-refresh', expires_in: 3600,
         token_type: 'Bearer', scope: granted })
@@ -65,7 +67,7 @@ test('synthetic issuer, owner session, browser preferences, renewable grant and 
       modelCalls++
       assert.match(init.headers.Authorization, /^Bearer (private|rotated)-access$/)
       return Response.json({ models: [
-        { slug: 'synthetic', display_name: 'Synthetic model', visibility: 'list', supported_reasoning_levels: [{ effort: 'medium' }] },
+        { slug: 'synthetic', display_name: 'Synthetic model', visibility: 'list', supported_reasoning_levels: efforts },
         { slug: 'automatic', display_name: 'Automatic model', visibility: 'list' },
         { slug: 'hidden', display_name: 'Hidden model', visibility: 'hidden' },
       ] })
@@ -116,8 +118,9 @@ test('synthetic issuer, owner session, browser preferences, renewable grant and 
   actor = owner; kind = 'session'
   const browser = await chromium.launch({ executablePath: process.env.SHELL_CHROME ?? '/usr/bin/google-chrome', headless: true, args: ['--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1'] })
   t.after(() => browser.close())
-  const page = await browser.newPage()
-  await page.route(origin + '/api/**', async route => {
+  const context = await browser.newContext()
+  const page = await context.newPage()
+  await page.context().route(origin + '/api/**', async route => {
     const response = await route.fetch({ url: apiOrigin + new URL(route.request().url()).pathname })
     if ((response.headers()['content-type'] ?? '').includes('json')) {
       assert.doesNotMatch(await response.text(), /private-access|private-refresh|rotated-refresh|id_token|issued-synthetic/)
@@ -129,17 +132,12 @@ test('synthetic issuer, owner session, browser preferences, renewable grant and 
     auth = new URL(req.url, origin).searchParams
     assert.equal(auth.get('prompt'), expectedConsent ? 'consent' : null)
     assert.equal(auth.get('scope'), granted.replace('resource.invoke offline_access', 'offline_access resource.invoke'))
-    if (!savedHost) {
-      savedHost = auth.get('ext_agent_host_id')
-      assert.equal(auth.get('client_id'), 'dynamic_agent_client')
-      assert.equal(auth.get('agent_name_hint'), 'SkyScrape')
-    } else {
-      assert.equal(auth.get('ext_agent_host_id'), savedHost)
-      assert.equal(auth.get('client_id'), 'issued-synthetic')
-      assert.equal(auth.has('agent_name_hint'), false)
-    }
+    savedHost ??= auth.get('ext_agent_host_id')
+    assert.equal(auth.get('ext_agent_host_id'), savedHost)
+    assert.equal(auth.get('client_id'), expectedClient)
+    assert.equal(auth.has('agent_name_hint'), expectedClient === 'dynamic_agent_client')
     const callback = new URL(auth.get('redirect_uri'))
-    callback.search = new URLSearchParams({ state: auth.get('state'), client_id: 'issued-synthetic', code: 'synthetic-code' })
+    callback.search = new URLSearchParams({ state: auth.get('state'), client_id: callbackClient, code: 'synthetic-code' })
     await assert.rejects(provider.finish('different-workspace-session'))
     const rival = new ChatGPT(store, origin, Number(callback.port), fetcher)
     await assert.rejects(rival.start(session), /callback port is occupied/)
@@ -155,7 +153,7 @@ test('synthetic issuer, owner session, browser preferences, renewable grant and 
   assert.equal(modelCalls, 0)
   await assert.rejects(provider.repairBrief({ category: 'parser_drift', fieldCount: 1 }))
   assert.equal(inference, 0)
-  direct = true; expectedConsent = true
+  direct = true; expectedConsent = true; expectedClient = callbackClient
   await page.getByRole('button', { name: 'Enable ChatGPT plan for Account 1' }).click()
   await page.getByRole('button', { name: 'Got it' }).click()
   expectedConsent = false
@@ -208,8 +206,49 @@ test('synthetic issuer, owner session, browser preferences, renewable grant and 
   await page.getByRole('button', { name: 'Connect Account 1' }).click()
   await expect(page.getByRole('combobox', { name: 'Reasoning effort' })).toHaveValue('medium')
   assert.equal(issuedTokens, 4)
+  efforts = []
+  await page.reload()
+  const effortPicker = page.getByRole('combobox', { name: 'Reasoning effort' })
+  await expect(effortPicker).toHaveValue('')
+  await page.getByRole('button', { name: 'Save preferences' }).click()
+  await expect(page.getByText('Preferences saved.')).toBeVisible()
+  assert.equal((await provider.status()).effort, undefined)
+  await page.getByRole('combobox', { name: 'Model', exact: true }).selectOption('automatic')
+
+  // Keep tab A's draft open while tab B reauthorizes and switches registrations.
+  const otherTab = await page.context().newPage()
+  await otherTab.goto(origin + '/settings')
+  exchangeFails = true
+  await otherTab.getByRole('button', { name: 'Reconnect Account 1' }).click()
+  await expect(otherTab.getByText('Sign-in could not be verified.', { exact: false })).toBeVisible()
+  await expect(otherTab.getByRole('button', { name: 'Retry new registration' })).toHaveCount(0)
+  expectedClient = 'dynamic_agent_client'; callbackClient = 'issued-synthetic-2'
+  await otherTab.getByRole('button', { name: 'Add ChatGPT account' }).click()
+  await expect(otherTab.getByRole('button', { name: 'Retry new registration' })).toBeVisible()
+  assert.equal((await provider.status()).active, state.active)
+  assert.equal((await provider.status('different-owner-session')).retryNew, false)
+  await assert.rejects(provider.start('different-owner-session', undefined, true), { code: 'CHATGPT_INVALID' })
+  exchangeFails = false; expectedClient = callbackClient; identity = 'second-synthetic'
+  await otherTab.getByRole('button', { name: 'Retry new registration' }).click()
+  await expect(otherTab.getByText('Using ChatGPT plan · Account 2')).toBeVisible()
+  await assert.rejects(provider.start(session, undefined, true), { code: 'CHATGPT_INVALID' })
+  const [staleSave] = await Promise.all([
+    page.waitForResponse(response => response.url().endsWith('/preferences')),
+    page.getByRole('button', { name: 'Save preferences' }).click(),
+  ])
+  assert.equal(staleSave.status(), 409)
+  assert.equal((await provider.status()).model, undefined)
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(page.getByText('Using ChatGPT plan · Account 2')).toBeVisible()
+  await expect(page.getByRole('combobox', { name: 'Model', exact: true })).toHaveValue('')
+  await expect(page.getByRole('button', { name: 'Save preferences' })).toBeDisabled()
+  await store(async host => {
+    assert.equal(host.accounts[0].model, 'synthetic')
+    assert.equal(host.accounts[1].model, undefined)
+  })
+  await otherTab.close()
   refreshFailure = 'refresh_token_expired'
-  await store(async (host, save) => { host.accounts[0].tokens.expires = 0; await save() })
+  await store(async (host, save) => { host.accounts[1].tokens.expires = 0; await save() })
   await page.reload()
   await expect(page.getByText('Disconnected', { exact: true })).toBeVisible()
   const count = refreshed
@@ -217,5 +256,54 @@ test('synthetic issuer, owner session, browser preferences, renewable grant and 
   assert.equal((await restored.status()).connected, false)
   await assert.rejects(restored.repairBrief({ category: 'parser_drift', fieldCount: 1 }), { code: 'CHATGPT_RECONNECT' })
   assert.equal(refreshed, count)
-  await expect(page.getByRole('button', { name: 'Reconnect Account 1' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Reconnect Account 2' })).toBeVisible()
+})
+
+test('catalog rejects a bearer, refreshes once, and preserves only recoverable grants', async () => {
+  const a = { id: 'account', label: 'Account 1', client: 'issued', subject: 'subject', model: 'saved',
+    tokens: { access: 'first', refresh: 'rotate', expires: Date.now() + 3600000, identity: 'id',
+      scopes: ['chatgpt.tokens.use.direct', 'resource.invoke'] } }
+  let host = { host: 'host', active: a.id, accounts: [a] }
+  const store = async work => {
+    const snapshot = structuredClone(host)
+    return work(snapshot, async () => { host = structuredClone(snapshot) })
+  }
+  const requests = []
+  let mode = 'recovered', nextAccess = 0
+  const catalog = Response.json({ models: [{ slug: 'saved', display_name: 'Saved', visibility: 'list' }] })
+  const fetcher = async (url, init) => {
+    if (url.endsWith('/models')) {
+      requests.push(init.headers.Authorization)
+      if (mode === 'policy') return new Response(null, { status: 403 })
+      if (init.headers.Authorization === 'Bearer first') {
+        return new Response(null, { status: 401, headers: { 'www-authenticate': 'Bearer realm="catalog", error="invalid_token"' } })
+      }
+      if (mode === 'confirmed') return Response.json({ error: { code: 'invalid_token' } }, { status: 401 })
+      return catalog.clone()
+    }
+    assert.equal(url, 'https://auth.openai.com/api/accounts/oauth/token')
+    requests.push('refresh')
+    if (mode === 'transient') return new Response(null, { status: 503 })
+    return Response.json({ access_token: 'next' + ++nextAccess, refresh_token: 'rotate' + nextAccess,
+      expires_in: 3600, token_type: 'Bearer' })
+  }
+  const provider = new ChatGPT(store, 'http://127.0.0.1', 0, fetcher)
+  assert.equal((await provider.status()).models[0].id, 'saved')
+  assert.deepEqual(requests.splice(0), ['Bearer first', 'refresh', 'Bearer next1'])
+  host.accounts[0] = structuredClone(a)
+  nextAccess = 0; mode = 'transient'
+  assert.equal((await provider.status()).connected, true)
+  assert.deepEqual(requests.splice(0), ['Bearer first', 'refresh'])
+  mode = 'recovered'
+  assert.equal((await provider.status()).models[0].id, 'saved')
+  assert.deepEqual(requests.splice(0), ['refresh', 'Bearer next1'])
+  mode = 'policy'
+  assert.equal((await provider.status()).connected, true)
+  assert.deepEqual(requests.splice(0), ['Bearer next1'])
+  mode = 'confirmed'
+  assert.equal((await provider.status()).connected, false)
+  assert.deepEqual(requests.splice(0), ['Bearer next1', 'refresh', 'Bearer next2'])
+  assert.equal((await provider.status()).active, a.id)
+  assert.equal((await provider.status()).model, 'saved')
+  assert.deepEqual(requests, [])
 })
