@@ -1,0 +1,34 @@
+services:
+  collection-egress:
+    build:
+      context: ./infra/egress
+    read_only: true
+    environment:
+      COLLECTION_DNS_IPV4: ${COLLECTION_DNS_IPV4:?Set the trusted IPv4 resolver for collection egress}
+    dns_search: ["."]
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m
+    cap_drop: [ALL]
+    # Startup installs namespace-local packet rules, then drops every capability.
+    cap_add: [NET_ADMIN, SETPCAP, SETUID, SETGID]
+    security_opt: [no-new-privileges:true]
+    sysctls:
+      net.ipv4.ip_forward: "0"
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 64
+    networks:
+      collection_private:
+        interface_name: clients0
+      collection_outbound:
+        interface_name: uplink0
+        gw_priority: 1
+
+networks:
+  collection_private:
+    internal: true
+    enable_ipv6: false
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: isolated
+  collection_outbound:
+    enable_ipv6: false
