@@ -1,0 +1,5 @@
+{
+  "name": "@skyscrape/connectors",
+  "private": true,
+  "type": "module"
+}
