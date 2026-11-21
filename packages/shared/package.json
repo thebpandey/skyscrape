@@ -1,8 +1,0 @@
-{
-  "name": "@skyscrape/shared",
-  "private": true,
-  "type": "module",
-  "dependencies": {
-    "pino": "10.4.0"
-  }
-}
