@@ -76,7 +76,7 @@ export function ChatGPTSettings() {
   }
   const data = result.data
   const hostname = window.location.hostname
-  const sshHost = /^(?:[a-z0-9][a-z0-9.-]*|\[[a-f0-9:]+\])$/i.test(hostname) ? hostname : 'YOUR_SSH_HOST'
+  const sshHost = /^(?:[a-z0-9][a-z0-9.-]*|\[[a-f0-9:]+\])$/i.test(hostname) ? hostname.replace(/^\[|\]$/g, '') : 'YOUR_SSH_HOST'
   return <div className="page"><h1>Settings</h1>
     <section aria-labelledby="chatgpt-title" className="state-card">
       <h2 id="chatgpt-title">Connect ChatGPT</h2>

@@ -135,12 +135,15 @@ test('synthetic issuer, owner session, browser preferences, renewable grant and 
     await route.fulfill({ response })
   })
   // Simulate a browser on another computer: its loopback cannot reach the API host.
-  const remoteOrigin = 'https://miniserver.test:10444'
+  const sshHosts = new Map([
+    ['https://miniserver.test:10444', 'miniserver.test'],
+    ['https://[fd00::1]:10444', 'fd00::1'],
+  ])
   const remotePage = await context.newPage()
   let starts = 0
   let loopbackVisits = 0
-  await remotePage.route(remoteOrigin + '/**', async route => {
-    const path = new URL(route.request().url()).pathname
+  await remotePage.route(url => sshHosts.has(url.origin), async route => {
+    const { origin: remoteOrigin, pathname: path } = new URL(route.request().url())
     if (path === base + '/connect') starts++
     const target = path.startsWith('/api/') ? apiOrigin : origin
     await route.fulfill({ response: await route.fetch({
@@ -151,16 +154,18 @@ test('synthetic issuer, owner session, browser preferences, renewable grant and 
     loopbackVisits++
     return route.fulfill({ status: 200, body: 'Synthetic client loopback' })
   })
-  await remotePage.goto(remoteOrigin + '/settings')
   const connectButton = remotePage.getByRole('button', { name: 'Continue with ChatGPT' })
-  await connectButton.click()
   const tunnel = remotePage.getByRole('dialog', { name: 'Connect from this computer' })
-  await expect(tunnel.locator('code')).toHaveText(
-    `ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:${callbackPort}:127.0.0.1:${callbackPort} `
-    + (process.env.CHATGPT_SSH_USER ?? userInfo().username) + '@miniserver.test')
-  await tunnel.getByRole('button', { name: 'Cancel' }).click()
-  assert.equal(starts, 0)
-  assert.equal(loopbackVisits, 0)
+  for (const [remoteOrigin, host] of sshHosts) {
+    await remotePage.goto(remoteOrigin + '/settings')
+    await connectButton.click()
+    await expect(tunnel.locator('code')).toHaveText(
+      `ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:${callbackPort}:127.0.0.1:${callbackPort} `
+      + (process.env.CHATGPT_SSH_USER ?? userInfo().username) + '@' + host)
+    await tunnel.getByRole('button', { name: 'Cancel' }).click()
+    assert.equal(starts, 0)
+    assert.equal(loopbackVisits, 0)
+  }
   await connectButton.click()
   await tunnel.getByRole('button', { name: 'Tunnel ready, continue' }).click()
   await expect(remotePage.getByText('Synthetic client loopback')).toBeVisible()
