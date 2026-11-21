@@ -2,6 +2,10 @@
   "name": "@skyscrape/server",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": "./src/app.ts",
+    "./auth": "./src/auth/index.ts"
+  },
   "dependencies": {
     "@better-auth/drizzle-adapter": "1.7.27",
     "@fastify/static": "10.1.12",

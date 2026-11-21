@@ -2,6 +2,10 @@
   "name": "@skyscrape/db",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./permits": "./src/permits.ts"
+  },
   "dependencies": {
     "drizzle-orm": "0.45.4",
     "pg": "8.23.1"
