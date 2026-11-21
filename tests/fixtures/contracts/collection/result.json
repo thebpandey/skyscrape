@@ -4,6 +4,7 @@
   "attemptId": "attempt_1",
   "classification": "success",
   "finalUrl": "https://records.example.org/parcels.json",
+  "httpStatus": 200,
   "redirects": [],
   "retrievedAt": "2026-12-01T18:00:01Z",
   "sourceTimestamp": "2026-11-30T12:00:00Z",

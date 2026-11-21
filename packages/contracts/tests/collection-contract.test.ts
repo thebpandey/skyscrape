@@ -16,7 +16,55 @@ test("shared examples validate as a request and an evidence-bearing result", () 
   const request = taskRequest.parse(fixture("request"));
   const result = taskResult.parse(fixture("result"));
   assert.equal(result.attemptId, request.attemptId);
+  assert.equal(result.httpStatus, 200);
   assert.equal(result.observations[0].artifactId, result.evidence[0].artifactId);
+});
+
+test("a failed challenge retains response metadata and screenshot evidence", () => {
+  const result = taskResult.parse(fixture("challenge-result"));
+  const { classification, httpStatus, responseMediaType, contentClassification, evidence } = result;
+  assert.deepEqual(
+    [classification, httpStatus, responseMediaType, contentClassification, evidence[0].mediaType],
+    ["failed", 200, "text/html", "challenge", "image/png"],
+  );
+  assert.equal(taskResult.safeParse({ ...result, responseMediaType: "x".repeat(256) }).success, false);
+  assert.equal(taskResult.safeParse({ ...result, contentClassification: "custom" }).success, false);
+});
+
+test("HTTP status is optional before a response and bounded when present", () => {
+  const result = fixture("challenge-result");
+  for (const field of ["httpStatus", "responseMediaType", "contentClassification", "finalUrl"]) {
+    delete result[field];
+  }
+  const failure = {
+    ...result,
+    counters: { ...result.counters, requests: 0, bytes: 0, browserSeconds: 0, quotaUnits: 0 },
+    evidence: [],
+    error: { ...result.error, code: "BUDGET_EXCEEDED", message: "Request budget exhausted",
+      outcome: "No request attempted", nextAction: "Review task limits" },
+  };
+  assert.deepEqual(taskResult.parse(failure), failure);
+  const success = fixture("result");
+  for (const status of [99, 600, 200.5]) {
+    assert.equal(taskResult.safeParse({ ...success, httpStatus: status }).success, false, `status ${status}`);
+  }
+});
+
+test("adaptive recovery preserves an exposed match score and accepts its omission", () => {
+  const result = fixture("result");
+  const recovery = { originalSelector: ".parcel-id", recoveredSelector: "#parcel-id", method: "adaptive", validation: "unverified" };
+  const observation = { ...result.observations[0], locator: "#parcel-id", recovery };
+  assert.deepEqual(taskResult.parse({ ...result, observations: [observation] }).observations[0].recovery, recovery);
+  const withScore = { ...observation, recovery: { ...recovery, matchScore: 87.5 } };
+  assert.equal(taskResult.parse({ ...result, observations: [withScore] }).observations[0].recovery?.matchScore, 87.5);
+  const outOfRange = { ...observation, recovery: { ...recovery, matchScore: 100.5 } };
+  assert.equal(taskResult.safeParse({ ...result, observations: [outOfRange] }).success, false);
+});
+
+test("SHA-256 evidence rejects a trailing line feed", () => {
+  const result = fixture("result");
+  result.evidence[0].sha256 += "\n";
+  assert.equal(taskResult.safeParse(result).success, false);
 });
 
 test("a recipe rejects an unrecognized operation", () => {

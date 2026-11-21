@@ -37,14 +37,15 @@ export const taskRequest = z.discriminatedUnion("mode", [
 ]).meta({ id: "TaskRequest" });
 
 const evidence = z.strictObject({
-  artifactId: id, sha256: z.string().regex(/^[0-9a-f]{64}$/), bytes: count(100_000_000),
+  artifactId: id, sha256: z.string().length(64).regex(/^[0-9a-f]{64}$/), bytes: count(100_000_000),
   mediaType: z.enum(["text/html", "text/csv", "application/json", "application/pdf", "text/plain", "image/png"]),
 }).meta({ id: "Evidence" });
 const observation = z.strictObject({
   field, original: z.string().min(1).max(2048), normalized: z.union([z.string().max(2048), z.number(), z.boolean()]).optional(),
   artifactId: id, locator: z.string().min(1).max(200),
   recovery: z.strictObject({ originalSelector: selector, recoveredSelector: selector,
-    method: z.literal("adaptive"), validation: z.enum(["unverified", "passed", "failed"]) }).optional(),
+    method: z.literal("adaptive"), validation: z.enum(["unverified", "passed", "failed"]),
+    matchScore: z.number().min(0).max(100).optional() }).optional(),
 });
 const message = z.string().min(1).max(400);
 export const collectionError = z.strictObject({
@@ -60,6 +61,8 @@ export const collectionError = z.strictObject({
 }).meta({ id: "CollectionError" });
 const manifest = {
   ...identity, finalUrl: url.optional(), redirects: z.array(url).max(10), retrievedAt: time,
+  httpStatus: z.int().min(100).max(599).optional(), responseMediaType: z.string().min(1).max(255).optional(),
+  contentClassification: z.enum(["expected", "challenge", "auth_required", "access_denied", "empty", "unexpected"]).optional(),
   sourceTimestamp: time.optional(), engineVersion: revision, browserVersion: revision.optional(), counters,
   evidence: z.array(evidence).max(32), observations: z.array(observation).max(128),
 };
