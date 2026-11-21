@@ -4,7 +4,10 @@ import { hashPassword } from 'better-auth/crypto'
 import type { DatabasePool } from '../../../../packages/db/src/index.ts'
 import type { Role } from '../../../../packages/security/src/index.ts'
 
-export function createAuth(pool: DatabasePool, origin: string, secret: string) {
+export function createAuth(pool: DatabasePool, origin: string, secret: string, cookiePrefix?: string) {
+  if (cookiePrefix !== undefined && !/^[A-Za-z0-9_-]{1,32}$/.test(cookiePrefix)) {
+    throw Error('AUTH_COOKIE_PREFIX must contain 1–32 ASCII letters, digits, underscores or hyphens')
+  }
   return betterAuth({
     database: pool,
     baseURL: origin,
@@ -13,6 +16,7 @@ export function createAuth(pool: DatabasePool, origin: string, secret: string) {
     trustedOrigins: [origin],
     emailAndPassword: { enabled: true, disableSignUp: true, minPasswordLength: 12 },
     advanced: {
+      ...(cookiePrefix === undefined ? {} : { cookiePrefix }),
       database: { generateId: () => randomUUID() },
       useSecureCookies: true,
       ipAddress: { ipAddressHeaders: ['x-skyscrape-client-ip'] },

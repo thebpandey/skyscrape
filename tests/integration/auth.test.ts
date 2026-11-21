@@ -65,7 +65,8 @@ let viewerId: string
 let analystId: string
 let loginAddress = 0
 
-const app = buildApp({ pool, authPool, adminPool, origin, authSecret: secret(), keyPepper, masterKey, masterKeyVersion: 7 })
+const appOptions = { pool, authPool, adminPool, origin, authSecret: secret(), keyPepper, masterKey, masterKeyVersion: 7 }
+const app = buildApp(appOptions)
 app.get('/api/v1/test-safe-error', () => { throw Error(privateMarker) })
 app.get<{ Params: { id: string } }>('/api/v1/test-export-contacts/:id', async req => {
   const { id } = req.params
@@ -352,6 +353,28 @@ test('accepts the plan campaign example and validates the documented timing vari
   ]) {
     assert.equal(campaignDraft.safeParse({ ...sample, timing }).success, false)
   }
+})
+
+test('isolates preview cookies across ports on the same host', async t => {
+  for (const authCookiePrefix of ['', 'bad;name', 'x'.repeat(33)]) {
+    assert.throws(() => buildApp({ ...appOptions, authCookiePrefix }), /AUTH_COOKIE_PREFIX/)
+  }
+  const otherOrigin = origin + ':10444'
+  const preview = buildApp({ ...appOptions, origin: otherOrigin, authCookiePrefix: 'skyscrape-review' })
+  t.after(() => preview.close())
+  const originalCookie = await sessionCookie(viewerEmail)
+  const login = await preview.inject({ method: 'POST', url: '/api/auth/sign-in/email',
+    headers: { origin: otherOrigin }, payload: { email: analystEmail, password } })
+  assert.equal(login.statusCode, 204)
+  const session = login.cookies.find(cookie => cookie.name === '__Secure-skyscrape-review.session_token')
+  assert.ok(session?.secure && session.httpOnly)
+  const reviewCookie = session.name + '=' + session.value
+  const me = (server: typeof app, cookie: string) => server.inject({ url: '/api/v1/me', headers: { cookie } })
+  assert.equal((await me(preview, originalCookie)).statusCode, 401)
+  assert.equal((await me(app, reviewCookie)).statusCode, 401)
+  const jar = originalCookie + '; ' + reviewCookie
+  assert.equal((await me(app, jar)).json().data.role, 'viewer')
+  assert.equal((await me(preview, jar)).json().data.role, 'analyst')
 })
 
 test('uses secure cookie sessions, rejects foreign origins, and audits local reset', async () => {

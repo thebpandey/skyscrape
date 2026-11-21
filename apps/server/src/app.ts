@@ -25,13 +25,14 @@ import { registerCampaigns } from './routes/campaigns.ts'
 import { registerRuns } from './routes/runs.ts'
 
 export function buildApp({
-  pool, authPool, adminPool, origin, authSecret, keyPepper, masterKey, masterKeyVersion = 1, chatgpt,
+  pool, authPool, adminPool, origin, authSecret, authCookiePrefix, keyPepper, masterKey, masterKeyVersion = 1, chatgpt,
 }: {
   pool: DatabasePool
   authPool: DatabasePool
   adminPool: DatabasePool
   origin: string
   authSecret: string
+  authCookiePrefix?: string
   keyPepper: string
   masterKey: Buffer
   chatgpt?: { owner: string; dir: string; port: number }
@@ -47,7 +48,7 @@ export function buildApp({
     throw Error('Set application secrets and a valid key version')
   }
 
-  const auth = createAuth(authPool, origin, authSecret)
+  const auth = createAuth(authPool, origin, authSecret, authCookiePrefix)
   const loggerInstance: FastifyBaseLogger = logger
   const app = Fastify({
     loggerInstance,
@@ -214,6 +215,7 @@ if (import.meta.main) {
   const adminPool = openDatabase(ADMIN_DATABASE_URL)
   const app = buildApp({
     pool, authPool, adminPool, origin: APP_ORIGIN, authSecret: AUTH_SECRET, keyPepper: API_KEY_PEPPER,
+    authCookiePrefix: process.env.AUTH_COOKIE_PREFIX,
     chatgpt: process.env.CHATGPT_OWNER_ID || process.env.CHATGPT_STATE_DIR ? {
       owner: process.env.CHATGPT_OWNER_ID ?? '', dir: process.env.CHATGPT_STATE_DIR ?? '',
       port: Number(process.env.CHATGPT_CALLBACK_PORT ?? 1455),

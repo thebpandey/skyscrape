@@ -9,6 +9,8 @@ The private preview’s owner can choose a ChatGPT account, model and reasoning 
 3. Restart the private API with this configuration. For the localhost and Tailscale API processes on the same miniserver, use the same directory, database, owner UUID, master key and key version. Each keeps its own existing `APP_ORIGIN`. Back up the encrypted directory and encryption key separately. Keep the same key and version when restoring.
 4. Sign in to the private workspace as the bound owner. Open **Settings**. Other users and API keys cannot access these controls.
 
+Browsers share cookies across ports on one hostname. For a second preview backed by a cloned database, set `AUTH_COOKIE_PREFIX=skyscrape-review` on both API processes serving the clone. Leave the original preview’s setting unchanged to preserve its sessions. Use a distinct, stable prefix for each additional database, with 1–32 ASCII letters, digits, hyphens or underscores. Users sign in separately to the new preview.
+
 ## Connect from a browser
 
 On the miniserver, go directly to step 2. On a different computer, use an SSH account with port forwarding access to the miniserver.
