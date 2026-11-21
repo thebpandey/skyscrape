@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="380" height="300" viewBox="0 0 380 300" fill="none">
+  <defs>
+    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M2 0v4M0 2h4" stroke="#64666b" stroke-width=".7"/></pattern>
+    <pattern id="lots" width="54" height="42" patternUnits="userSpaceOnUse" patternTransform="matrix(.94 -.36 .47 .8 0 0)">
+      <path d="M1 1h48v36H1zM1 19h48M16 1v18m15 0v18m7-36v18" stroke="#8b8f94" stroke-width="1"/>
+    </pattern>
+    <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse"><path d="m-1 1 2-2m-2 8 8-8m-2 8 2-2" stroke="#f7d647" stroke-width="1.2"/></pattern>
+  </defs>
+  <path fill="url(#grid)" d="M0 0h380v300H0z"/>
+  <g transform="translate(3 10)">
+    <path d="m-38 112 164-64 36 62-164 64zm209-82 147-55 40 64-147 57zM8 190l158-61 41 74-158 60zm212-82 155-59 41 74-154 60zM60 282l158-61 35 65-158 61zm212-83 154-59 36 63-154 61z" fill="url(#lots)" stroke="#a0a3a5" stroke-width="1"/>
+    <path d="m77 192 56-21 20 34-56 22z" fill="#554d2b" stroke="#ffda54"/><path d="m77 192 56-21 20 34-56 22z" fill="url(#hatch)"/>
+    <path d="m133 171 24-29h69" stroke="#ffda54"/><circle cx="226" cy="142" r="3" fill="#ffda54"/>
+    <path d="M-10 193 423 25M138 28l157 277" stroke="#b3b4b5" stroke-width="1" stroke-dasharray="6 7"/>
+  </g>
+</svg>

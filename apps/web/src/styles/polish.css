@@ -1,0 +1,124 @@
+/* Shared details for the approved light and dark Permit Register surfaces. */
+html:root {
+  --rail: #303235;
+  --rail-muted: #d0d0d0;
+  --rail-active: #46484a;
+  --rail-border: #65676a;
+  --yellow: #ffda45;
+  --rule-strong: #b7b8b5;
+  --wash: #f6f6f3;
+  --lift: 0 3px 12px rgb(32 32 24 / .06);
+}
+html:root[data-theme="dark"] {
+  --rail: #262729;
+  --rail-active: #3c3d40;
+  --rail-border: #57585c;
+  --rule-strong: #47484a;
+  --wash: #171819;
+  --lift: none;
+}
+.brand .brand-mark { border-radius: 5px; width: 36px; height: 36px; }
+.brand strong { font-size: 21px; letter-spacing: -.055em; line-height: 1; }
+.rail.desktop-rail { border-right: 1px solid var(--rail-border); }
+.rail .workspace-nav { gap: 3px; }
+.rail .workspace-nav a { font-weight: 600; }
+.rail .workspace-nav a[aria-current] { box-shadow: inset 3px 0 var(--yellow); }
+.rail .workspace-nav a[aria-current]::after { content: none; }
+.rail .avatar { border: 1px solid var(--rail-border); }
+.workspace .topbar { background: var(--paper); }
+.workspace .global-search { border-color: var(--rule-strong); background: var(--wash); }
+.workspace .panel { box-shadow: var(--lift); }
+.workspace .permit-table thead th { font-size: 11px; font-weight: 700; letter-spacing: .055em; text-transform: uppercase; }
+.workspace .permit-table tbody tr:not([data-selected]):hover > * { background: var(--wash); }
+.workspace .panel-head { align-items: center; }
+.workspace .evidence-pane .panel-head, .narrow-evidence .dialog-header { box-shadow: inset 0 3px var(--yellow); }
+.workspace .section-label, .narrow-evidence .section-label { font-size: 11px; letter-spacing: .075em; text-transform: uppercase; }
+.metadata dd, .permit-table td { font-variant-numeric: tabular-nums; }
+.source-section .metadata > div:last-child { border-bottom: 0; }
+.workspace .register-sections { margin-top: 8px; }
+.workspace .button:not(.primary):not([data-oai-siwc-button]):active { background: var(--selection); }
+.workspace input:hover, .workspace select:hover, .login-form input:hover { border-color: var(--muted); }
+.workspace .campaign-form fieldset, .workspace .campaign-preview { padding: 18px; background: var(--paper); }
+.campaign-page > section[aria-label="Saved campaigns"] { padding: 16px 20px; background: var(--wash); border: 1px solid var(--divider); border-radius: 6px; }
+.campaign-page > section[aria-label="Saved campaigns"] h2 { margin-bottom: 6px; font-size: 17px; }
+.campaign-page > section[aria-label="Saved campaigns"] p { color: var(--muted); }
+.campaign-page > section[aria-label="Saved campaigns"] a { text-decoration: underline; text-underline-offset: 3px; }
+
+@media (min-width: 760px) {
+  .campaign-page > section[aria-label="Saved campaigns"] {
+    position: relative; padding-right: clamp(145px, 18vw, 250px); overflow: hidden;
+  }
+  .campaign-page > section[aria-label="Saved campaigns"]::after {
+    content: ""; position: absolute; inset: 0 0 0 auto; width: clamp(110px, 16vw, 220px);
+    background: var(--rail) url('./survey.svg') right 57% / 240px auto no-repeat;
+    clip-path: polygon(23% 0, 100% 0, 100% 100%, 0 100%); pointer-events: none;
+  }
+}
+.workspace .run-results > aside { box-shadow: inset 0 3px var(--yellow); }
+.workspace .run-results > section, .workspace .run-results > aside { background: var(--paper); }
+.page > .state-card:only-of-type { max-width: 70ch; }
+.campaign-page .catalog-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-top: 7px; }
+.catalog-heading span { color: var(--muted); font: 13px var(--mono); }
+.campaign-page .template-catalog { grid-template-columns: repeat(auto-fill, minmax(min(100%, 245px), 1fr)); gap: 12px; }
+.campaign-page .template-catalog a {
+  position: relative; grid-template-columns: 1fr auto; gap: 7px 12px;
+  padding: 16px; border-color: var(--rule-strong); overflow-wrap: anywhere;
+}
+.template-catalog a .template-icon, h1 .template-icon {
+  grid-column: auto; display: inline-grid; place-items: center; justify-self: start; width: 36px; height: 36px;
+  border: 1px solid var(--divider); border-radius: 6px; background: var(--wash); color: var(--ink);
+}
+.template-catalog .template-arrow { color: var(--muted); margin-top: 2px; }
+.template-catalog a strong { grid-column: 1 / -1; margin-top: 4px; letter-spacing: -.025em; }
+.template-catalog a .template-description { font-size: 14px; line-height: 1.4; }
+.campaign-page .template-catalog a:is(:hover, :focus-visible, :active) {
+  border-color: var(--focus); box-shadow: inset 3px 0 var(--yellow); background: var(--selection);
+}
+.template-catalog a:is(:hover, :focus-visible, :active) .template-icon, h1.template-title .template-icon {
+  background: var(--yellow); color: var(--on-yellow); border-color: var(--yellow);
+}
+.template-title { display: flex; align-items: center; gap: 12px; }
+.template-title .template-icon { flex: none; }
+.page .state-card[aria-labelledby="chatgpt-title"] { max-width: 640px; padding: clamp(18px, 3vw, 30px); background: var(--paper); }
+.state-card[aria-labelledby="chatgpt-title"] > :where(p, form, a):not(:empty) { margin-block: 10px; }
+.state-card[aria-labelledby="chatgpt-title"] > button { margin: 4px 6px 4px 0; }
+.state-card[aria-labelledby="chatgpt-title"] > a { display: inline-block; text-decoration: underline; text-underline-offset: 3px; }
+.state-card[aria-labelledby="chatgpt-title"] form { padding-block: 12px; border-block: 1px solid var(--divider); }
+.command-sheet:has(> h2) { padding: 20px; }
+.command-sheet:has(> h2) > p { margin-block: 10px 16px; }
+main.access-layout { align-items: center; padding: 32px 16px; }
+.access-layout .access-panel { box-shadow: var(--lift); }
+.access-panel .access-brand {
+  min-height: 106px; padding: 20px;
+  background: var(--rail) url('./survey.svg') no-repeat right -80px center / 260px auto;
+}
+.access-brand .brand { width: fit-content; background: var(--rail); }
+.access-panel .access-footer { border-top: 1px solid var(--divider); background: var(--wash); }
+.access-footer .appearance-label { color: var(--muted); }
+.access-panel .login-form .primary { justify-self: stretch; }
+@media (min-width: 760px) {
+  .access-layout .access-panel:has(.login-form) { display: grid; width: min(100%, 820px); grid-template-columns: 44% 1fr; }
+  .access-panel:has(.login-form) .access-brand {
+    grid-row: span 2; padding: 26px; background-position: left bottom; background-size: 100% auto;
+  }
+  .access-panel:has(.login-form) .access-content { padding: 38px 36px 27px; }
+  .access-panel:has(.login-form) .access-footer { padding: 15px 36px 20px; }
+}
+@media (max-width: 600px) {
+  .campaign-page .template-catalog { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .campaign-page .template-catalog a { grid-template-columns: 36px 1fr 17px; align-items: center; gap: 3px 11px; padding: 12px; }
+  .template-catalog a .template-icon { grid-column: 1; grid-row: 1 / 3; }
+  .template-catalog a strong, .template-catalog a .template-description { grid-column: 2; }
+  .template-catalog a strong { grid-row: 1; margin: 0; font-size: 16px; }
+  .template-catalog a .template-arrow { grid-column: 3; grid-row: 1 / 3; }
+  .page.campaign-page { gap: 12px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  :where(.button, .icon-button, .appearance button, .workspace-nav a, .template-catalog a, .template-icon, input, select) {
+    transition: background-color 130ms ease-out, border-color 130ms ease-out, box-shadow 130ms ease-out;
+  }
+  .template-arrow { transition: transform 140ms ease-out; }
+  .template-catalog a:is(:hover, :focus-visible) .template-arrow { transform: translate(2px, -2px); }
+  .dialog-overlay[data-state="open"], .dialog-sheet[data-state="open"] { animation: register-appear 140ms ease-out; }
+  @keyframes register-appear { from { opacity: 0; } to { opacity: 1; } }
+}

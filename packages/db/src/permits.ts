@@ -69,7 +69,10 @@ export async function readEvidence(pool: DatabasePool, principal: Principal, id:
   if (!can(principal, 'evidence:read')) return undefined
   const { rows } = await pool.query<Evidence>(`
     SELECT observation.id, source.name AS "sourceName", version.version AS "sourceVersion",
-      observation.event_date::text AS "eventDate",
+      CASE WHEN version.manifest->>'connector'='seattle-building-permits'
+        THEN max(evidence.value) FILTER (WHERE evidence.field='issuedOn' AND evidence.relation='supports'
+          AND evidence.acceptance IN ('verified','corroborated'))
+        ELSE observation.event_date::text END AS "eventDate",
       to_jsonb(observation.source_modified_at) AS "sourceModifiedAt",
       to_jsonb(observation.fetched_at) AS "fetchedAt",
       observation.extractor_version AS "extractorVersion",

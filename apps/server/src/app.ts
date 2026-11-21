@@ -17,10 +17,15 @@ import { logger } from '../../../packages/shared/src/index.ts'
 import { createAuth } from './auth/index.ts'
 import { authenticatedOf, principalOf, registerAccess } from './middleware/access.ts'
 import { fail, registerErrors } from './middleware/errors.ts'
+import { ChatGPT } from './chatgpt/provider.ts'
+import { hostStore } from './chatgpt/store.ts'
+import { registerChatGPT } from './routes/chatgpt-settings.ts'
 import { registerAdminAuth } from './routes/admin-auth.ts'
+import { registerCampaigns } from './routes/campaigns.ts'
+import { registerRuns } from './routes/runs.ts'
 
 export function buildApp({
-  pool, authPool, adminPool, origin, authSecret, keyPepper, masterKey, masterKeyVersion = 1,
+  pool, authPool, adminPool, origin, authSecret, keyPepper, masterKey, masterKeyVersion = 1, chatgpt,
 }: {
   pool: DatabasePool
   authPool: DatabasePool
@@ -29,6 +34,7 @@ export function buildApp({
   authSecret: string
   keyPepper: string
   masterKey: Buffer
+  chatgpt?: { owner: string; dir: string; port: number }
   masterKeyVersion?: number
 }) {
   const publicUrl = new URL(origin)
@@ -62,6 +68,12 @@ export function buildApp({
       if (database.role !== expected) throw Error(`Expected database role ${expected}`)
     }))
   })
+  if (chatgpt && (!z.uuid().safeParse(chatgpt.owner).success || !chatgpt.dir.startsWith('/')
+      || !Number.isInteger(chatgpt.port) || chatgpt.port < 1 || chatgpt.port > 65535)) {
+    throw Error('Configure the ChatGPT owner UUID, absolute storage directory and callback port')
+  }
+  const provider = chatgpt && new ChatGPT(hostStore(pool, chatgpt.dir, chatgpt.owner, masterKey, masterKeyVersion), origin, chatgpt.port)
+  app.addHook('onClose', async () => { provider?.close() })
   registerErrors(app)
   registerAccess(app, authPool, auth, origin, keyPepper)
   app.register(swagger, {
@@ -129,11 +141,11 @@ export function buildApp({
 
     routes.get('/api/v1/me', {
       schema: { response: { 200: envelopeSchema(z.strictObject({
-        id: z.uuid(), role: z.enum(roles), kind: z.enum(['session', 'key']), scopes: z.array(z.enum(scopes)),
+        chatgptSettings: z.literal(true).optional(), id: z.uuid(), role: z.enum(roles), kind: z.enum(['session', 'key']), scopes: z.array(z.enum(scopes)),
       })) } },
     }, req => {
       const principal = principalOf(req)
-      return envelope({ ...principal, scopes: [...principal.scopes] }, req.id)
+      return envelope({ ...principal, ...(chatgpt?.owner === principal.id && principal.kind === 'session' ? { chatgptSettings: true as const } : {}), scopes: [...principal.scopes] }, req.id)
     })
 
     routes.get('/api/v1/records', {
@@ -176,7 +188,10 @@ export function buildApp({
     })
 
     routes.get('/api/v1/openapi.json', { schema: { hide: true } }, async () => app.swagger())
+    registerChatGPT(app, chatgpt?.owner, provider)
     registerAdminAuth(app, { adminPool, keyPepper, masterKey, masterKeyVersion })
+    registerCampaigns(app, pool)
+    registerRuns(app, pool)
   })
   return app
 }
@@ -199,6 +214,10 @@ if (import.meta.main) {
   const adminPool = openDatabase(ADMIN_DATABASE_URL)
   const app = buildApp({
     pool, authPool, adminPool, origin: APP_ORIGIN, authSecret: AUTH_SECRET, keyPepper: API_KEY_PEPPER,
+    chatgpt: process.env.CHATGPT_OWNER_ID || process.env.CHATGPT_STATE_DIR ? {
+      owner: process.env.CHATGPT_OWNER_ID ?? '', dir: process.env.CHATGPT_STATE_DIR ?? '',
+      port: Number(process.env.CHATGPT_CALLBACK_PORT ?? 1455),
+    } : undefined,
     masterKey: Buffer.from(MASTER_KEY, 'base64'), masterKeyVersion: Number(MASTER_KEY_VERSION ?? 1),
   })
   app.addHook('onClose', async () => {

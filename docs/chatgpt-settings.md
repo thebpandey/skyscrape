@@ -1,0 +1,28 @@
+# Connect a ChatGPT plan
+
+The private preview’s owner can choose a ChatGPT account, model and reasoning effort in **Settings**. Each account has its own preferences. Connecting and listing models do not run inference. A repair request uses the selected account’s plan. Check its usage limits and credit settings before permitting requests. [Manage ChatGPT usage](https://chatgpt.com/settings/usage)
+
+## Configure the preview
+
+1. Identify the existing SkyScrape owner’s user UUID from the authenticated owner’s `/api/v1/me` response. Confirm that it belongs to the intended person. The account can retain its analyst role.
+2. In the API’s private environment file, set `CHATGPT_OWNER_ID` to that UUID and `CHATGPT_STATE_DIR` to an absolute directory outside the checkout owned by the API service user. Give the directory mode `0700`. Set `CHATGPT_CALLBACK_PORT` to an available port, normally `1455`.
+3. Restart the private API with this configuration. For the localhost and Tailscale API processes on the same miniserver, use the same directory, database, owner UUID, master key and key version. Each keeps its own existing `APP_ORIGIN`. Back up the encrypted directory and encryption key separately. Keep the same key and version when restoring.
+4. Sign in to the private workspace as the bound owner. Open **Settings**. Other users and API keys cannot access these controls.
+
+## Connect from a browser
+
+On the miniserver, go directly to step 2. On a different computer, use an SSH account with port forwarding access to the miniserver.
+
+1. From the computer running the browser, open the following tunnel. Replace the SSH destination with your miniserver’s SSH account and Tailscale name. If the callback port differs, substitute it on both sides. Keep the tunnel open through sign-in.
+
+   ```sh
+   ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:1455:127.0.0.1:1455 USER@MINISERVER
+   ```
+
+2. Open the existing private SkyScrape URL on that computer. Select **Settings → Continue with ChatGPT**. Choose a workspace and review the permission to use your ChatGPT plan. The provider returns to the browser computer’s loopback address. The tunnel forwards that callback to the initiating API process. SkyScrape returns you to the original private workspace.
+3. Choose an available model and reasoning effort, then select **Save preferences**. If the account catalog omits reasoning options, **Model default** lets the provider choose. Refresh Settings to check the saved selection.
+4. To use another registration, choose **Add ChatGPT account** or connect a saved account. **Disconnect ChatGPT** attempts to revoke the selected renewable grant and clears its local tokens. If SkyScrape reports an unconfirmed revocation, disconnect the app in ChatGPT Settings.
+
+A refused loopback connection usually means the tunnel is missing, the port differs, or a previous sign-in is still using it. Finish or retry the sign-in from the same workspace browser session. Each pending sign-in expires after ten minutes. A failed account switch preserves the previously selected account. If you authorize identity only, the saved registration displays **Enable ChatGPT plan**. Select it to review plan permissions for that account. An expired or invalidated refresh grant requires reconnecting. When the provider reports a plan limit, review the app’s limits in ChatGPT usage settings. If the provider temporarily cannot check usage, try again later. A failed model-list request offers **Retry**.
+
+SkyScrape keeps an encrypted host and account record on the miniserver. Its authorization listener opens on IPv4 loopback only during a sign-in. The Tailscale hostname is the application origin, while the provider’s callback always uses `127.0.0.1`. [OpenAI registration and sign-in](https://developers.openai.com/siwc/token-sharing-open-source/sign-in) · [Self-hosted VM guidance](https://developers.openai.com/siwc/token-sharing-open-source/self-hosted-vms)

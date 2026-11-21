@@ -204,6 +204,9 @@ class Retrieval:
             try:
                 if self.task["recipe"]["format"] == "json":
                     data = json.loads(body)
+                    if data == []:
+                        self.content = "empty"
+                        return Extraction([], "EMPTY_CONTENT")
                     records = data if isinstance(data, list) else [data]
                     if any(not isinstance(record, dict) for record in records):
                         raise ValueError

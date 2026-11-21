@@ -123,6 +123,23 @@ class CollectionServiceTest(unittest.IsolatedAsyncioTestCase):
         }])
         self.assertEqual((await client.post(f"{TASKS}/{task['taskId']}/cancel")).json()["cancellation"], "already_finished")
 
+    async def test_empty_array_has_proof_and_blank_body_does_not(self):
+        for body in (b" [ ] ", b"  "):
+            async def respond(_):
+                return httpx.Response(200, headers={"Content-Type": "application/json"}, stream=Chunks(body))
+
+            client = await self.api(respond)
+            task = request()
+            self.assertEqual((await client.post(TASKS, json=task)).status_code, 202)
+            result = (await self.terminal(client, task))["result"]
+            self.assertEqual(result["error"]["code"], "EMPTY_CONTENT")
+            if body.strip():
+                artifact, = result["evidence"]
+                self.assertEqual(artifact["sha256"], hashlib.sha256(body).hexdigest())
+                self.assertEqual((self.artifacts / artifact["artifactId"]).read_bytes(), body)
+            else:
+                self.assertEqual(result["evidence"], [])
+
     async def test_policy_redirect_quota_and_bytes(self):
         async def respond(call):
             if call.url.params.get("$limit") == "1":

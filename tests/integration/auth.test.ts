@@ -225,7 +225,8 @@ after(async () => {
 
 test('migrates an empty PostGIS DB once and keeps privileged objects private', async () => {
   assert.match((await pool.query<{ version: string }>('SELECT postgis_version() AS version')).rows[0].version, /^3\.7/)
-  assert.equal((await migrator.query('SELECT 1 FROM drizzle.__drizzle_migrations')).rowCount, 2)
+  const journal = JSON.parse(readFileSync(new URL('../../packages/db/migrations/meta/_journal.json', import.meta.url), 'utf8'))
+  assert.equal((await migrator.query('SELECT 1 FROM drizzle.__drizzle_migrations')).rowCount, journal.entries.length)
   for (const sql of [
     'SELECT digest FROM bootstrap_token',
     'SELECT * FROM drizzle.__drizzle_migrations',
