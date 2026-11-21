@@ -2,6 +2,8 @@
 
 Only `collection-egress` joins both networks. The client bridge `collection_private` is internal and has no host gateway address. Squid listens on its client-side IPv4 address on port 3128. The `collection_outbound` bridge supplies its internet route. The proxy publishes no host port. Network names are scoped to the Compose project.
 
+Set `COLLECTION_DNS_IPV4` to a trusted IPv4 DNS resolver reachable from `collection_outbound` on UDP and TCP port 53. Export it before running Compose. A host's loopback resolver is outside the proxy's network namespace.
+
 From the repository root, start the proxy with Docker Engine 28 or later and Compose 2.36 or later.
 
 ```sh
@@ -33,7 +35,7 @@ Docker DNS resolves the proxy service name on the private network. The loopback 
 
 ## Destination policy
 
-Squid checks each CONNECT authority against the allowlist and accepts only TCP port 443. The kernel checks the actual IPv4 destination on outbound packets, including packets sent after a DNS change. It rejects special-use, private and metadata addresses. The firewall allows outbound IPv4 connections to TCP 443 and queries to Docker's embedded DNS. Squid runs without capabilities after startup installs the namespace-local firewall. [Source assessment](../../docs/source-assessment.md)
+Squid checks each CONNECT authority against the allowlist and accepts only TCP port 443. Squid queries the configured resolver directly. The firewall permits UDP and TCP port 53 only to that address. It checks each outbound connection to TCP port 443 against the special-use, private and metadata address policy, even when the DNS answer changes. Squid runs without capabilities after startup installs the namespace-local firewall. [Source assessment](../../docs/source-assessment.md)
 
 If the deployment routes any globally assigned IP addresses to host services or internal networks, deny access to those addresses from `collection_outbound` in the host firewall.
 
@@ -41,7 +43,7 @@ The tunnel passes bytes through. The collector must verify TLS certificates, rej
 
 ## Check the boundary
 
-Run `bash infra/egress/check.sh` from the repository root. It creates two isolated bridges, a client and a fixture origin. A forwarding address exists only in the test containers. The check exercises the real proxy and firewall. It contacts no publisher. To run offline with warm images, set `EGRESS_CHECK_IMAGE` to a previously built proxy image and retain the pinned Alpine base locally.
+Run `bash infra/egress/check.sh` from the repository root. It creates two isolated bridges, a client, a CoreDNS resolver and an origin. The resolver serves synthetic addresses only. The check exercises DNS, the proxy and the firewall without contacting a publisher. To run offline with warm images, set `EGRESS_CHECK_IMAGE` to a previously built proxy image and retain the pinned Alpine and CoreDNS images locally.
 
 For an opt-in publisher check, run this single HEAD from a collector attached to the production-shaped network.
 

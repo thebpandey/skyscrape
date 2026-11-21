@@ -17,10 +17,9 @@ table inet collection_egress {
         iifname "clients0" tcp dport 3128 accept
     }
     chain output {
-        # Docker rewrites its embedded DNS port in OUTPUT at dstnat (-100).
-        type filter hook output priority -101; policy drop;
+        type filter hook output priority filter; policy drop;
         ct direction reply ct state established,related accept
-        oifname "lo" ip daddr 127.0.0.11 meta l4proto { tcp, udp } th dport 53 accept
+        oifname "uplink0" ip daddr $trusted_resolver meta l4proto { tcp, udp } th dport 53 accept
         ip daddr @special_ipv4 reject
         oifname "uplink0" meta nfproto ipv4 tcp dport 443 accept
     }

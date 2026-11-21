@@ -3,6 +3,8 @@ services:
     build:
       context: ./infra/egress
     read_only: true
+    environment:
+      COLLECTION_DNS_IPV4: ${COLLECTION_DNS_IPV4:?Set the trusted IPv4 resolver for collection egress}
     dns_search: ["."]
     tmpfs:
       - /tmp:rw,nosuid,nodev,noexec,size=16m
