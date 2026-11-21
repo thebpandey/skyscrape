@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import ssl
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -13,6 +14,14 @@ class Publisher(BaseHTTPRequestHandler):
         url = urlsplit(self.path)
         if host == "data.seattle.gov":
             Path("/fixture/canary-reached").touch()
+        if url.path == "/Building-and-Development/Issued-Construction-Permits/3syk-w9eu":
+            self.send_response(503)
+            self.send_header("Retry-After", "60")
+            self.send_header("Content-Length", "1")
+            self.end_headers()
+            Path("/fixture/retry-headers-sent").touch()
+            time.sleep(10)
+            return
         if url.path.startswith("/resource/"):
             query = parse_qs(url.query)
             if host == "data.austintexas.gov" and query.get("$select") != ["permit_number"]:
@@ -31,7 +40,7 @@ class Publisher(BaseHTTPRequestHandler):
         limited = url.path == "/d/3syk-w9eu"
         self.send_response(429 if limited else 200)
         if limited:
-            self.send_header("Retry-After", "60")
+            self.send_header("Retry-After", "2")
         self.send_header("Content-Type", media_type)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()

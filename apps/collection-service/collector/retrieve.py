@@ -12,10 +12,10 @@ from typing import Awaitable, Callable
 from urllib.parse import urljoin
 
 import httpx
+from curl_cffi import CurlHttpVersion, CurlOpt
 from curl_cffi.curl import CURL_WRITEFUNC_ERROR, CurlError
+from curl_cffi.requests import AsyncSession, Headers
 from scrapling import Selector
-from scrapling.core.utils import log as scrapling_log
-from scrapling.fetchers import AsyncFetcher
 
 from .policy import CrawlDelay, prepare_url
 from .protocol import CollectionFailure
@@ -27,6 +27,7 @@ MAX_BYTES = 8 * 1024 * 1024
 MAX_OBSERVATIONS = 128
 MAX_ORIGINAL_LENGTH = 2048
 REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+RetryAfterCallback = Callable[[str], None]
 
 
 @dataclass
@@ -64,7 +65,6 @@ class PageResponse:
     body: bytes
     headers: dict[str, str]
     status: int
-    failure: CollectionFailure | httpx.HTTPError | None = None
 
 
 @dataclass
@@ -79,7 +79,7 @@ class Retrieval:
     client: httpx.AsyncClient
     throttle: CrawlDelay
     budget: Budget
-    html_reader: Callable[[str, Budget], Awaitable[PageResponse]] | None = None
+    html_reader: Callable[[str, Budget, RetryAfterCallback], Awaitable[PageResponse]] | None = None
     redirects: list[str] = field(default_factory=list)
     final_url: str | None = None
     status: int | None = None
@@ -87,7 +87,7 @@ class Retrieval:
     content: str | None = None
     source_time: str | None = None
 
-    async def read_native(self, url: str) -> PageResponse:
+    async def read_native(self, url: str, on_retry_after: RetryAfterCallback) -> PageResponse:
         request = httpx.Request(
             "GET", url, headers={
                 "Accept-Encoding": "identity",
@@ -97,6 +97,8 @@ class Retrieval:
         response = await self.client.send(request, stream=True, follow_redirects=False)
         headers = dict(response.headers)
         try:
+            if retry_after := headers.get("retry-after"):
+                on_retry_after(retry_after)
             content = bytearray()
             if 200 <= response.status_code < 300 and response.status_code != 206:
                 if headers.get("content-encoding", "identity").lower() != "identity":
@@ -108,8 +110,6 @@ class Retrieval:
                     self.budget.charge(len(chunk))
                     content.extend(chunk)
             return PageResponse(bytes(content), headers, response.status_code)
-        except (CollectionFailure, httpx.HTTPError) as failure:
-            return PageResponse(b"", headers, response.status_code, failure)
         finally:
             await response.aclose()
 
@@ -118,14 +118,14 @@ class Retrieval:
         for redirect_count in range(11):
             async with self.throttle.request(hostname):
                 self.budget.begin_request()
+
+                def on_retry_after(value: str) -> None:
+                    self.throttle.defer(hostname, value)
+
                 if self.task["mode"] == "html" and self.html_reader:
-                    response = await self.html_reader(url, self.budget)
+                    response = await self.html_reader(url, self.budget, on_retry_after)
                 else:
-                    response = await self.read_native(url)
-                if retry_after := response.headers.get("retry-after"):
-                    self.throttle.defer(hostname, retry_after)
-                if response.failure is not None:
-                    raise response.failure
+                    response = await self.read_native(url, on_retry_after)
             self.record_response(url, response)
             if response.status in REDIRECT_STATUSES:
                 if redirect_count == 10 or "location" not in response.headers:
@@ -248,10 +248,9 @@ class Retrieval:
         return Extraction(observations, error)
 
 
-async def fetch_html(url: str, budget: Budget, ca_file: str) -> PageResponse:
-    # Upstream's standard response log includes the full URL and query.
-    scrapling_log.disabled = True
+async def fetch_html(url: str, budget: Budget, ca_file: str, on_retry_after: RetryAfterCallback) -> PageResponse:
     body = bytearray()
+    received_headers: list[bytes] = []
     limited = False
 
     def receive(chunk: bytes) -> int:
@@ -264,28 +263,44 @@ async def fetch_html(url: str, budget: Budget, ca_file: str) -> PageResponse:
         body.extend(chunk)
         return len(chunk)
 
+    def receive_header(line: bytes) -> int:
+        header = line.rstrip(b"\r\n")
+        if header.startswith(b"HTTP/"):
+            received_headers.clear()
+        elif header.startswith((b" ", b"\t")) and received_headers:
+            received_headers[-1] += header
+        elif b":" in header:
+            received_headers.append(header)
+            name, _, value = header.partition(b":")
+            if name.lower() == b"retry-after":
+                on_retry_after(value.decode("latin-1"))
+        return len(line)
+
     try:
-        response = await AsyncFetcher.get(
-            url, proxy=PROXY, verify=ca_file, timeout=10, retries=0, follow_redirects=False,
-            impersonate=None, stealthy_headers=False, http3=False, accept_encoding="identity",
-            headers={"User-Agent": "Skyscrape-Collection/1.0"}, discard_cookies=True,
-            content_callback=receive, selector_config={"adaptive": False, "huge_tree": False},
-        )
+        async with AsyncSession(
+            retry=0, trust_env=False,
+            curl_options={CurlOpt.HEADERFUNCTION: receive_header, CurlOpt.SUPPRESS_CONNECT_HEADERS: 1},
+        ) as session:
+            response = await session.get(
+                url, proxy=PROXY, verify=ca_file, timeout=10, allow_redirects=False,
+                http_version=CurlHttpVersion.V2TLS, accept_encoding="identity",
+                headers={"User-Agent": "Skyscrape-Collection/1.0"}, discard_cookies=True,
+                content_callback=receive,
+            )
+        status = response.status_code
     except CurlError as error:
         failed = getattr(error, "response", None)
-        failure = CollectionFailure("BUDGET_EXCEEDED") if limited else CollectionFailure(
-            "SOURCE_ACCESS_DENIED", retryable=True,
-        )
-        if failed is None or not failed.status_code:
+        if failed is None or failed.status_code != 429:
+            failure = CollectionFailure("BUDGET_EXCEEDED") if limited else CollectionFailure(
+                "SOURCE_ACCESS_DENIED", retryable=True,
+            )
             raise failure from None
-        headers = {name.lower(): value for name, value in failed.headers.items()}
-        if failed.status_code == 429:
-            return PageResponse(b"", headers, 429)
-        return PageResponse(b"", headers, failed.status_code, failure)
-    headers = {name.lower(): value for name, value in response.headers.items()}
-    if response.status < 300 and headers.get("content-encoding", "identity").lower() != "identity":
-        return PageResponse(b"", headers, response.status, CollectionFailure("PARSE_FAILED"))
-    return PageResponse(bytes(body), headers, response.status)
+        status = 429
+        body.clear()
+    headers = {name.lower(): value for name, value in Headers(received_headers).items()}
+    if status < 300 and headers.get("content-encoding", "identity").lower() != "identity":
+        raise CollectionFailure("PARSE_FAILED")
+    return PageResponse(bytes(body), headers, status)
 
 
 def utc_now() -> str:

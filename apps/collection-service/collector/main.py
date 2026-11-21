@@ -32,7 +32,7 @@ def main() -> None:
         token=token,
         staging=STAGING_PATH,
         schema=SCHEMA_PATH,
-        html_reader=lambda url, budget: fetch_html(url, budget, ca_file),
+        html_reader=lambda url, budget, on_retry_after: fetch_html(url, budget, ca_file, on_retry_after),
         client_factory=lambda: httpx.AsyncClient(
             proxy=PROXY, verify=tls_context, trust_env=False, timeout=10, follow_redirects=False,
         ),

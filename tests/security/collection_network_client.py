@@ -10,7 +10,7 @@ import httpx
 ACTUAL = "/internal/v1/tasks"
 
 
-def run(client, name, url, mode, recipe, domain="data.austintexas.gov", limit=4096, seconds=25):
+def submit(client, name, url, mode, recipe, domain="data.austintexas.gov", limit=4096, seconds=25):
     payload = {
         "protocolVersion": 1, "taskId": name, "attemptId": "one", "runId": "synthetic",
         "correlationId": "synthetic", "sourceId": "synthetic_source", "sourceVersion": "1",
@@ -21,6 +21,9 @@ def run(client, name, url, mode, recipe, domain="data.austintexas.gov", limit=40
     }
     submit = client.post(ACTUAL, json=payload)
     assert submit.status_code == 202, submit.status_code
+
+
+def finish(client, name):
     for _ in range(150):
         response = client.get(f"{ACTUAL}/{name}", params={"attemptId": "one"})
         result = response.json()
@@ -28,6 +31,11 @@ def run(client, name, url, mode, recipe, domain="data.austintexas.gov", limit=40
             return result["result"]
         time.sleep(0.1)
     raise AssertionError(f"Fixture task {name} did not finish")
+
+
+def run(client, name, *args, **kwargs):
+    submit(client, name, *args, **kwargs)
+    return finish(client, name)
 
 
 def verify_result(result, expected):
@@ -91,7 +99,15 @@ with httpx.Client(
     assert throttled["counters"]["bytes"] == 8 and throttled["counters"]["requests"] == 1
     blocked = run(client, "synthetic_retry_wait", austin_data, "structured", permit, seconds=1)
     assert blocked["error"]["code"] == "BUDGET_EXCEEDED" and blocked["counters"]["requests"] == 0
+    submit(client, "synthetic_slow_503", austin_page.removesuffix("/about_data"), "html", html, seconds=4)
+    submit(client, "synthetic_waiting_task", austin_data, "structured", permit, seconds=6)
+    timed_out = finish(client, "synthetic_slow_503")
+    assert timed_out["error"]["code"] == "BUDGET_EXCEEDED" and timed_out["counters"]["requests"] == 1
+    deferred = finish(client, "synthetic_waiting_task")
+    assert deferred["counters"]["requests"] == 0, deferred["counters"]
+    assert deferred["error"]["code"] == "BUDGET_EXCEEDED"
 
-print("PASS authenticated Unix socket, structured TLS, Scrapling HTTP, one-request byte cap, and private artifacts")
+print("PASS authenticated Unix socket, structured TLS, HTML extraction, one-request byte cap, and private artifacts")
 print("PASS municipal projection and publisher Retry-After are enforced across retrieval modes")
+print("PASS queued task makes zero requests after a 503 header arrives and its body times out")
 print("PASS redirects remain in-source and proxy blocks the internal canary")

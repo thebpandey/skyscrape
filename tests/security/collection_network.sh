@@ -98,7 +98,7 @@ cleanup() {
   if [[ -z ${COLLECTOR_CHECK_IMAGE:-} ]]; then docker image rm "$collector_image" >/dev/null 2>&1 || true; fi
   if [[ -z ${COLLECTOR_CHECK_PROXY_IMAGE:-} ]]; then docker image rm "$proxy_image" >/dev/null 2>&1 || true; fi
   rm -f "$scratch/service-token" "$scratch/key.pem" "$scratch/cert.pem" "$scratch/Corefile" \
-    "$scratch/compose.yaml" "$scratch/canary-reached"
+    "$scratch/compose.yaml" "$scratch/canary-reached" "$scratch/retry-headers-sent"
   rmdir "$scratch"
 }
 trap cleanup EXIT
@@ -111,6 +111,7 @@ for address in "$fixture" 169.254.169.254 "$COLLECTION_DNS_IPV4"; do
   "${compose[@]}" exec -T collection-egress ip route add "$address/32" via "$origin_ip" dev uplink0
 done
 "${compose[@]}" run --rm --no-deps checker
+[[ -f "$scratch/retry-headers-sent" ]]
 "${compose[@]}" exec -T collector python -c '
 import os
 import socket
