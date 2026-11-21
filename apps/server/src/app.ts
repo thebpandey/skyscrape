@@ -1,0 +1,189 @@
+import { randomUUID } from 'node:crypto'
+import { fromNodeHeaders } from 'better-auth/node'
+import swagger from '@fastify/swagger'
+import { jsonSchemaTransform, serializerCompiler, validatorCompiler } from '@fastify/type-provider-zod'
+import type { ZodTypeProvider } from '@fastify/type-provider-zod'
+import Fastify, { LogController } from 'fastify'
+import type { FastifyBaseLogger, FastifyReply, FastifyRequest } from 'fastify'
+import { z } from 'zod'
+import {
+  envelope, envelopeSchema, evidenceProjection, idParams, loginEmail, recordProjection, recordsQuery,
+} from '../../../packages/contracts/src/index.ts'
+import { openDatabase } from '../../../packages/db/src/index.ts'
+import type { DatabasePool } from '../../../packages/db/src/index.ts'
+import { readEvidence, readPermits } from '../../../packages/db/src/permits.ts'
+import { roles, scopes } from '../../../packages/security/src/index.ts'
+import { logger } from '../../../packages/shared/src/index.ts'
+import { createAuth } from './auth/index.ts'
+import { principalOf, registerAccess } from './middleware/access.ts'
+import { fail, registerErrors } from './middleware/errors.ts'
+import { registerAdminAuth } from './routes/admin-auth.ts'
+
+export function buildApp({
+  pool, origin, authSecret, keyPepper, masterKey, masterKeyVersion = 1,
+}: {
+  pool: DatabasePool
+  origin: string
+  authSecret: string
+  keyPepper: string
+  masterKey: Buffer
+  masterKeyVersion?: number
+}) {
+  const publicUrl = new URL(origin)
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(publicUrl.hostname)
+  if (publicUrl.origin !== origin || (publicUrl.protocol !== 'https:' && !(loopback && publicUrl.protocol === 'http:'))) {
+    throw Error('Set APP_ORIGIN to an HTTPS origin or a loopback HTTP origin')
+  }
+  if (authSecret.length < 32 || keyPepper.length < 32 || masterKey.length !== 32
+      || !Number.isSafeInteger(masterKeyVersion) || masterKeyVersion < 1 || masterKeyVersion > 2147483647) {
+    throw Error('Set application secrets and a valid key version')
+  }
+
+  const auth = createAuth(pool, origin, authSecret)
+  const loggerInstance: FastifyBaseLogger = logger
+  const app = Fastify({
+    loggerInstance,
+    logController: new LogController({ disableRequestLogging: true }),
+    bodyLimit: 32 * 1024,
+    requestIdHeader: false,
+    genReqId: () => randomUUID(),
+  })
+
+  app.setValidatorCompiler(validatorCompiler)
+  app.setSerializerCompiler(serializerCompiler)
+  registerErrors(app)
+  registerAccess(app, pool, auth, origin, keyPepper)
+  app.register(swagger, {
+    openapi: { openapi: '3.1.0', info: { title: 'Skyscrape API', version: '1.0.0' } },
+    transform: jsonSchemaTransform,
+  })
+
+  app.after(() => {
+    const routes = app.withTypeProvider<ZodTypeProvider>()
+
+    async function handleAuth(req: FastifyRequest, reply: FastifyReply, email?: string) {
+      const passwordBefore = email === undefined ? undefined : (
+        await pool.query<{ id: string; password_revision: number }>(`
+          SELECT account.id, account.password_revision FROM account
+          JOIN "user" owner ON owner.id=account."userId"
+          WHERE owner.email=$1 AND account."providerId"='credential'
+        `, [email.toLowerCase()])
+      ).rows[0]
+      const headers = fromNodeHeaders(req.headers)
+      headers.set('x-skyscrape-client-ip', req.ip)
+      headers.delete('content-length')
+      headers.delete('transfer-encoding')
+      const result = await auth.handler(new Request(origin + req.routeOptions.url, {
+        method: req.method,
+        headers,
+        body: req.body === undefined ? undefined : JSON.stringify(req.body),
+      }))
+      if (!result.ok) {
+        if (result.status === 429) {
+          const retryAfter = result.headers.get('retry-after')
+          if (retryAfter) reply.header('Retry-After', retryAfter)
+          fail(429, 'RATE_LIMITED', 'Try again later')
+        }
+        if (result.status < 500) fail(401, 'UNAUTHORIZED', 'Sign-in or sign-out failed')
+        fail(502, 'AUTH_UNAVAILABLE', 'Authentication unavailable')
+      }
+      if (email !== undefined) {
+        const { token } = z.object({ token: z.string() }).parse(await result.json())
+        // Wait for an in-progress reset before deciding whether this session survived it.
+        const { rowCount } = await pool.query(`
+          SELECT 1 FROM account
+          JOIN session ON session."userId"=account."userId"
+          WHERE account.id=$1 AND account.password_revision=$2 AND session.token=$3
+          FOR SHARE OF account
+        `, [passwordBefore?.id, passwordBefore?.password_revision, token])
+        if (!rowCount) {
+          await pool.query('DELETE FROM session WHERE token=$1', [token])
+          fail(401, 'UNAUTHORIZED', 'Sign-in or sign-out failed')
+        }
+      }
+      const cookies = result.headers.getSetCookie()
+      if (cookies.length) reply.header('Set-Cookie', cookies)
+      return reply.code(204).send()
+    }
+
+    routes.post('/api/auth/sign-in/email', {
+      schema: { hide: true, body: z.strictObject({
+        email: loginEmail,
+        password: z.string().min(1).max(128),
+        rememberMe: z.boolean().optional(),
+      }) },
+    }, (req, reply) => handleAuth(req, reply, req.body.email))
+    routes.post('/api/auth/sign-out', { schema: { hide: true } }, (req, reply) => handleAuth(req, reply))
+
+    routes.get('/api/v1/me', {
+      schema: { response: { 200: envelopeSchema(z.strictObject({
+        id: z.uuid(), role: z.enum(roles), kind: z.enum(['session', 'key']), scopes: z.array(z.enum(scopes)),
+      })) } },
+    }, req => {
+      const principal = principalOf(req)
+      return envelope({ ...principal, scopes: [...principal.scopes] }, req.id)
+    })
+
+    routes.get('/api/v1/records', {
+      preHandler: app.requireScope('records:read'),
+      schema: {
+        querystring: recordsQuery,
+        response: { 200: envelopeSchema(z.array(recordProjection)) },
+      },
+    }, async req => {
+      const { cursor, ...filter } = req.query
+      let after: string | undefined
+      if (cursor) {
+        const parsed = z.uuid().safeParse(Buffer.from(cursor, 'base64url').toString('utf8'))
+        if (!parsed.success) fail(400, 'INVALID_CURSOR', 'Invalid cursor')
+        after = parsed.data
+      }
+      const records = await readPermits(pool, principalOf(req), { ...filter, after, limit: filter.limit + 1 })
+      const page = records.slice(0, filter.limit)
+      const last = page.at(-1)
+      const nextCursor = records.length > filter.limit && last ? Buffer.from(last.id).toString('base64url') : undefined
+      return envelope(page, req.id, nextCursor)
+    })
+
+    routes.get('/api/v1/records/:id', {
+      preHandler: app.requireScope('records:read'),
+      schema: { params: idParams, response: { 200: envelopeSchema(recordProjection) } },
+    }, async req => {
+      const [record] = await readPermits(pool, principalOf(req), { id: req.params.id, limit: 1 })
+      if (!record) fail(404, 'NOT_FOUND', 'Record not found')
+      return envelope(record, req.id)
+    })
+
+    routes.get('/api/v1/evidence/:id', {
+      preHandler: app.requireScope('evidence:read'),
+      schema: { params: idParams, response: { 200: envelopeSchema(evidenceProjection) } },
+    }, async req => {
+      const evidence = await readEvidence(pool, principalOf(req), req.params.id)
+      if (!evidence) fail(404, 'NOT_FOUND', 'Evidence not found')
+      return envelope(evidence, req.id)
+    })
+
+    routes.get('/api/v1/openapi.json', { schema: { hide: true } }, async () => app.swagger())
+    registerAdminAuth(app, { pool, keyPepper, masterKey, masterKeyVersion })
+  })
+  return app
+}
+
+if (import.meta.main) {
+  const { DATABASE_URL, APP_ORIGIN, AUTH_SECRET, API_KEY_PEPPER, MASTER_KEY, MASTER_KEY_VERSION } = process.env
+  if (!DATABASE_URL || !APP_ORIGIN || !AUTH_SECRET || !API_KEY_PEPPER || !MASTER_KEY) {
+    throw Error('Set DATABASE_URL, APP_ORIGIN, AUTH_SECRET, API_KEY_PEPPER and MASTER_KEY')
+  }
+  const origin = new URL(APP_ORIGIN)
+  const port = Number(process.env.PORT ?? (origin.port || '3000'))
+  const pool = openDatabase(DATABASE_URL)
+  const app = buildApp({
+    pool, origin: APP_ORIGIN, authSecret: AUTH_SECRET, keyPepper: API_KEY_PEPPER,
+    masterKey: Buffer.from(MASTER_KEY, 'base64'), masterKeyVersion: Number(MASTER_KEY_VERSION ?? 1),
+  })
+  app.addHook('onClose', () => pool.end())
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.once(signal, () => { void app.close() })
+  }
+  await app.listen({ host: process.env.HOST ?? '127.0.0.1', port })
+}
