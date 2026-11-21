@@ -64,6 +64,7 @@ class PageResponse:
     body: bytes
     headers: dict[str, str]
     status: int
+    failure: CollectionFailure | httpx.HTTPError | None = None
 
 
 @dataclass
@@ -94,8 +95,8 @@ class Retrieval:
             },
         )
         response = await self.client.send(request, stream=True, follow_redirects=False)
+        headers = dict(response.headers)
         try:
-            headers = dict(response.headers)
             content = bytearray()
             if 200 <= response.status_code < 300 and response.status_code != 206:
                 if headers.get("content-encoding", "identity").lower() != "identity":
@@ -107,6 +108,8 @@ class Retrieval:
                     self.budget.charge(len(chunk))
                     content.extend(chunk)
             return PageResponse(bytes(content), headers, response.status_code)
+        except (CollectionFailure, httpx.HTTPError) as failure:
+            return PageResponse(b"", headers, response.status_code, failure)
         finally:
             await response.aclose()
 
@@ -119,8 +122,10 @@ class Retrieval:
                     response = await self.html_reader(url, self.budget)
                 else:
                     response = await self.read_native(url)
-                if response.status == 429 and "retry-after" in response.headers:
-                    self.throttle.defer(hostname, response.headers["retry-after"])
+                if retry_after := response.headers.get("retry-after"):
+                    self.throttle.defer(hostname, retry_after)
+                if response.failure is not None:
+                    raise response.failure
             self.record_response(url, response)
             if response.status in REDIRECT_STATUSES:
                 if redirect_count == 10 or "location" not in response.headers:
@@ -268,15 +273,18 @@ async def fetch_html(url: str, budget: Budget, ca_file: str) -> PageResponse:
         )
     except CurlError as error:
         failed = getattr(error, "response", None)
-        if failed is not None and failed.status_code == 429:
-            return PageResponse(b"", {name.lower(): value for name, value in failed.headers.items()}, 429)
         failure = CollectionFailure("BUDGET_EXCEEDED") if limited else CollectionFailure(
             "SOURCE_ACCESS_DENIED", retryable=True,
         )
-        raise failure from None
+        if failed is None or not failed.status_code:
+            raise failure from None
+        headers = {name.lower(): value for name, value in failed.headers.items()}
+        if failed.status_code == 429:
+            return PageResponse(b"", headers, 429)
+        return PageResponse(b"", headers, failed.status_code, failure)
     headers = {name.lower(): value for name, value in response.headers.items()}
     if response.status < 300 and headers.get("content-encoding", "identity").lower() != "identity":
-        raise CollectionFailure("PARSE_FAILED")
+        return PageResponse(b"", headers, response.status, CollectionFailure("PARSE_FAILED"))
     return PageResponse(bytes(body), headers, response.status)
 
 

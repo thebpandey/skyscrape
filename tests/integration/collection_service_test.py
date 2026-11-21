@@ -179,15 +179,20 @@ class CollectionServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(list(self.artifacts.iterdir())), 1)
 
     async def test_publisher_retry_after_blocks_other_tasks_at_that_host(self):
-        for header in ("60", format_datetime(datetime.now(UTC) + timedelta(minutes=1), usegmt=True)):
-            with self.subTest(retry_after=header):
+        date = format_datetime(datetime.now(UTC) + timedelta(minutes=1), usegmt=True)
+        for status, header, code in (
+            (429, "60", "RATE_LIMITED"),
+            (429, date, "RATE_LIMITED"),
+            (503, "60", "SOURCE_ACCESS_DENIED"),
+        ):
+            with self.subTest(status=status, retry_after=header):
                 self.calls.clear()
                 started, release = asyncio.Event(), asyncio.Event()
 
                 async def respond(_):
                     started.set()
                     await release.wait()
-                    return httpx.Response(429, headers={"Retry-After": header})
+                    return httpx.Response(status, headers={"Retry-After": header})
 
                 client = await self.api(respond)
                 first = request(taskId="first")
@@ -199,7 +204,8 @@ class CollectionServiceTest(unittest.IsolatedAsyncioTestCase):
                 release.set()
 
                 result = (await self.terminal(client, first))["result"]
-                self.assertEqual(result["error"]["code"], "RATE_LIMITED")
+                self.assertEqual(result["error"]["code"], code)
+                self.assertTrue(result["error"]["retryable"])
                 waiting = (await self.terminal(client, next_task))["result"]
                 self.assertEqual(waiting["error"]["code"], "BUDGET_EXCEEDED")
                 self.assertEqual(waiting["counters"]["requests"], 0)
