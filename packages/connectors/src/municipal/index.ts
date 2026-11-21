@@ -111,6 +111,12 @@ function permitText(raw: PublisherValue): string | null {
   return typeof raw === "string" ? raw.trim() || null : null;
 }
 
+function permitIdentifier(raw: PublisherValue): string | null {
+  const text = permitText(raw);
+  return text !== null && !/^(?:n\/?a|n\.a\.|not available|not applicable|unknown|none|null|-+)$/i.test(text)
+    ? text : null;
+}
+
 function postalCode(raw: PublisherValue): string | null {
   const text = permitText(raw);
   return text !== null && /^\d{5}(?:-\d{4})?$/.test(text) ? text : null;
@@ -155,7 +161,7 @@ const austinFields = [
   ["statusAt", "statusdate", calendarDate],
   ["siteAddress", "original_address1", permitText],
   ["postalCode", "original_zip", (raw) => postalCode(typeof raw === "number" ? String(raw) : raw)],
-  ["localAppraisalId", "tcad_id", permitText],
+  ["localAppraisalId", "tcad_id", permitIdentifier],
   ["reportedPermitValuationUsd", "total_job_valuation", decimal],
   ["reportedPermitHousingUnits", "housing_units", integer],
 ] as const satisfies readonly (readonly [field: string, ...ColumnMapping])[];
@@ -237,11 +243,10 @@ function normalizeRow(dataset: Dataset, row: unknown, evidence: MunicipalPermitE
   const rawSourceRecordKey = publisherValue(row, recordColumn);
   const sourceRecordKey = normalizeKey(rawSourceRecordKey);
   const rawNumber = publisherValue(row, dataset.permitNumber);
-  const permitNumber = permitText(rawNumber);
+  const permitNumber = permitIdentifier(rawNumber);
   const rawIssuedAt = publisherValue(row, dataset.issuedAt);
   const eventDate = calendarDate(rawIssuedAt);
   if (typeof sourceRecordKey !== "string" || permitNumber === null
-    || /^(?:n\/?a|n\.a\.|not available|not applicable|unknown|none|null|-+)$/i.test(permitNumber)
     || (dataset.requireIssuedDate && eventDate === null)) return null;
 
   const { fetchedAt, evidenceRef, evidenceDigest } = evidence;

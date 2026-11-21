@@ -145,9 +145,17 @@ test("rejects rows without usable identity or issuance and requires evidence for
   assert.throws(() => normalizeSeattlePermit(fixture.seattle, { ...evidence, evidenceDigest: "" }), TypeError);
 });
 
-test("rejects missing permit number markers before assigning natural IDs", () => {
+test("rejects missing permit numbers and retains missing appraisal IDs as raw evidence", () => {
   assert.equal(normalizeAustinPermit({ ...fixture.austin, permit_number: " N/A " }, evidence), null);
   assert.equal(normalizeSeattlePermit({ ...fixture.seattle, permitnum: "unknown" }, evidence), null);
+  const permit = normalizeAustinPermit({ ...fixture.austin, tcad_id: "N/A" }, evidence);
+  assert.ok(permit);
+  const appraisalId = assertion(permit, "localAppraisalId");
+  assert.equal(appraisalId.sourceField, "tcad_id");
+  assert.equal(appraisalId.rawValue, "N/A");
+  assert.equal(appraisalId.value, null);
+  assert.equal(appraisalId.acceptance, "unknown");
+  assert.equal(appraisalId.evidenceDigest, evidence.evidenceDigest);
 });
 
 test("retains unusable postal codes as raw evidence with unknown acceptance", () => {
