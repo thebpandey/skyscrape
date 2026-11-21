@@ -11,6 +11,8 @@ corepack pnpm install --frozen-lockfile
 corepack pnpm verify
 ```
 
-`pnpm verify` typechecks the workspace verification script and checks each manifest against its installed dependency versions. The API, web app, worker, MCP bridge, database, collector, and browser tests are pending. Extend `pnpm verify` and CI as their checks become runnable. Setup at this stage requires no service credentials, database, or browsers.
+`pnpm verify` typechecks the workspace verification script and checks each manifest against its installed dependency versions. The API, web app, worker, MCP bridge, application migrations, collector, and browser tests are pending. Extend `pnpm verify` and CI as their checks become runnable. Setup at this stage requires no service credentials, database, or browsers.
+
+[Run the private PostGIS database](infra/compose/db/README.md).
 
 The product and release requirements are in [docs/requirements](docs/requirements).
