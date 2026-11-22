@@ -97,7 +97,7 @@ export function Research({ session }: { session: Session }) {
           <strong>{title}</strong><span className="template-description">{description}</span></Link>)}</nav>
       <Link className="text-link" to="/campaigns">Browse all campaign templates</Link></section>}
     <section><h2>Model availability</h2><p>Research runs use the campaign’s eligible source records. Model-assisted research is unavailable.
-      The ChatGPT connection in Settings applies to repair briefs.</p></section>
+      Settings stores the owner’s ChatGPT connection and model preferences.</p></section>
     {can(session, 'runs:read') && <section><h2>Saved investigations and runs</h2>
       <p className="muted">Open a campaign’s run history, then select a run to read its findings, inspect field evidence and review gaps.</p>
       <Activity /></section>}

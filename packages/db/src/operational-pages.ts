@@ -62,11 +62,15 @@ async function recentRuns(db: Reader, principal: Principal, exportsOnly: boolean
 
 async function currentIncidents(db: Reader, principal: Principal, id?: string) {
   return (await db.query<IssueRegister['incidents'][number]>(
-    currentSources + ` SELECT i.id,v.name AS source,v.version,v.manifest @> '{"synthetic":true}' AS synthetic,
+    currentSources + ` SELECT i.id,v.name AS source,original.version,original.manifest @> '{"synthetic":true}' AS synthetic,
       (SELECT count(*)::int FROM repair_briefs b WHERE b.incident_id=i.id) AS "briefCount",
       CASE WHEN i.state IN ('detected','triaged','brief_ready','assigned','candidate_tested','canary','resolved','rolled_back')
         THEN i.state ELSE 'unknown' END AS state
-      FROM incidents i JOIN visible v ON v.id=i.source_version_id WHERE ($2::uuid IS NULL OR i.id=$2)
+      FROM incidents i JOIN source_versions original ON original.id=i.source_version_id
+      JOIN visible v ON v.source_id=original.source_id
+      WHERE original.eligibility='qualified' AND ($1::boolean OR
+        (original.manifest->'campaignImport'->>'kind') IS DISTINCT FROM 'contact')
+        AND ($2::uuid IS NULL OR i.id=$2)
       ORDER BY v.name,i.id LIMIT 100`, [can(principal, 'contacts:read'), id ?? null])).rows
 }
 

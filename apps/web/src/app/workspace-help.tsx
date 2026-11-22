@@ -50,7 +50,7 @@ const topics: Topic[] = [
   ] },
   { title: 'Connect ChatGPT from the server or over SSH', page: 'Settings', paragraphs: [
     'The designated owner opens Settings and chooses Continue with ChatGPT. From a browser on the miniserver, select the local-browser option if prompted. From another computer, copy the SSH tunnel command shown in Settings into a terminal on that computer. Use your SSH login and leave the terminal open. A quiet terminal is expected.',
-    'Choose Tunnel ready, continue. Complete provider sign-in in the same browser, review plan permissions and return to Settings. Choose a supported model and effort, then Save preferences. Review plan limits before enabling use for repair briefs.',
+    'Choose Tunnel ready, continue. Complete provider sign-in in the same browser, review plan permissions and return to Settings. Choose a supported model and effort, then Save preferences. These preferences are saved for the connected account. Repair briefs in Issues use a fixed Markdown template with details from the selected incident or run.',
     'If the callback is refused, check the forwarded port and SSH host. Close your own conflicting tunnel or reuse the correct one. Start fresh in Settings and discard stale callback URLs. After an expired first registration, choose Retry new registration. Keep tokens and callback links private.',
   ] },
   { title: 'Recover a failed, partial or waiting run', page: 'Issues', scope: 'issues:read', paragraphs: [
